@@ -14,7 +14,9 @@ object Main extends JSApp {
         val cursor = TokenCursor(tokens, 3)
         val builder = new StringBuilder()
         Parser.parseProgram(cursor) match {
-            case Success(parsed) => new Emitter({ s => builder.append(s); () }).emitProgram(parsed)
+            case Success(parsed) =>
+                new TypeCheck().checkProgram(parsed)
+                new Emitter({ s => builder.append(s); () }).emitProgram(parsed)
             case failure : Failure => throw failure
         }
         builder.toString()
