@@ -7,6 +7,7 @@ import TypeCheck._
 
 class TypeCheck {
 
+    var typeVariables = new TypeVariables()
     var variables = new Variables()
     var sumTypes = new SumTypes()
 
@@ -57,35 +58,54 @@ class TypeCheck {
             throw new RuntimeException("Expected type: " + expected + ", but encountered: " + pattern)
     }
 
+    def instantiate(generalType : Type) : Type = {
+        val mapping = mutable.HashMap[String, String]()
+        def go(t : Type) : Type = t match {
+            case FunctionType(parameters, returns) => FunctionType(parameters.map(go), go(returns))
+            case VariableType(name) => VariableType(mapping.getOrElseUpdate(name, typeVariables.fresh()))
+            case ConstructorType(name, fields) => ConstructorType(name, fields.map { case (label, fieldType) => (label, go(fieldType)) })
+            case ConstantType(name, parameters) => ConstantType(name, parameters.map(go))
+            case RecordType(fields) => RecordType(fields.map { case (label, fieldType) => (label, go(fieldType)) })
+        }
+        go(generalType)
+    }
+
     def checkTerm(expected : Type, term : Term) : Unit = (expected, term) match {
-        case (_, Variable(name)) => variables.get(name) match {
-            case None => throw new RuntimeException("Undefined variable: " + name)
+        case (_, Variable(x)) => variables.get(x) match {
+            case None => throw new RuntimeException("Undefined variable: " + x)
             case Some(scheme) =>
-                // TODO: replace forall with "rigid" fresh variables
-                if(expected != scheme.generalType) throw new RuntimeException("Expected type: " + expected + ", but got: " + scheme.generalType)
+                val t = instantiate(scheme.generalType)
+                if(expected != t) throw new RuntimeException("Expected type: " + expected + ", but got: " + scheme.generalType)
         }
         case (FunctionType(parameters, returns), Lambda(cases)) =>
             for((patterns, statements) <- cases) {
-                if(parameters.length != patterns.length) throw new RuntimeException("Expected " + parameters.length + " patterns, but got " + patterns.length)
+                val skipPatterns = parameters == List(RecordType(List())) && patterns.isEmpty
                 val oldVariables = variables.copy
                 // TODO: Check that variables do not occur twice in each case
-                for((pattern, expectedType) <- patterns zip parameters) checkPattern(expectedType, pattern)
+                if(!skipPatterns) {
+                    if(parameters.length != patterns.length) throw new RuntimeException("Expected " + parameters.length + " patterns, but got " + patterns.length)
+                    for((pattern, expectedType) <- patterns zip parameters) checkPattern(expectedType, pattern)
+                }
                 checkStatements(returns, statements)
                 variables = oldVariables
             }
-        case (_, Call(Variable(name), parameters)) => // add support for all function terms
-            variables.get(name) match {
-                case None => throw new RuntimeException("Unknown variable: " + name)
-                case Some(expectedScheme) =>
-                    val functionType = expectedScheme.generalType // TODO
-                    functionType match {
-                        case FunctionType(parameterTypes, returnType) =>
-                            for((t, p) <- parameterTypes zip parameters) checkTerm(t, p)
-                            if(parameterTypes.length != parameters.length) throw new RuntimeException("Expected " + parameterTypes.length + " parameters, but got " + parameters.length)
-                            if(expected != returnType) throw new RuntimeException("Expected type: " + expected + ", but got: " + returnType)
-                        case _ => throw new RuntimeException("Can't call a non-function type: " + functionType)
+        case (_, call : Call) => // add support for all function terms
+            def go(f : Term) : Type = f match {
+                case Variable(name) =>
+                    variables.get(name) match {
+                        case None => throw new RuntimeException("Unknown variable: " + name)
+                        case Some(expectedScheme) => expectedScheme.generalType // TODO
                     }
+                case Call(inner, parameters) => go(inner) match {
+                    case FunctionType(parameterTypes, t) =>
+                        for((t, p) <- parameterTypes zip parameters) checkTerm(t, p)
+                        if(parameterTypes.length != parameters.length) throw new RuntimeException("Expected " + parameterTypes.length + " parameters, but got " + parameters.length)
+                        t
+                    case t => throw new RuntimeException("Can't call a non-function type: " + t)
+                }
             }
+            val returnType = go(call)
+            if(expected != returnType) throw new RuntimeException("Expected type: " + expected + ", but got: " + returnType)
         case (ConstantType(typeName, typeParameters), Constructor(name, fields)) =>
             sumTypes.get(typeName) match {
                 case None => throw new RuntimeException("No constructor: " + name + ", of non-sum-type: " + expected)
@@ -142,6 +162,12 @@ class TypeCheck {
         case (ConstantType("Bool", List()), BinaryOperator(token, left, right)) =>
             checkTerm(ConstantType("Int", List()), left)
             checkTerm(ConstantType("Int", List()), right)
+        case (VariableType(a), _) =>
+            typeVariables.get(a) match {
+                case None => throw new RuntimeException("No such type variable: " + a + ", encountered: " + term)
+                case Some(None) => throw new RuntimeException("Type variable not instantiated: " + a + ", encountered: " + term)
+                case Some(Some(t)) => checkTerm(t, term)
+            }
         case (_, _) =>
             throw new RuntimeException("Expected type: " + expected + ", but encountered: " + term)
     }
@@ -231,4 +257,18 @@ object TypeCheck {
         def set(name : String, statement : SumTypeStatement) = map.put(name, statement)
         def copy = new SumTypes(mutable.HashMap(map.toSeq : _*))
     }
+
+    class TypeVariables(map : mutable.HashMap[String, Option[Type]] = mutable.HashMap()) {
+        def get(name : String) : Option[Option[Type]] = map.get(name)
+        def set(name : String, statement : Option[Type]) = map.put(name, statement)
+        def copy = new TypeVariables(mutable.HashMap(map.toSeq : _*))
+        def fresh() : String = {
+            val name = "_" + nextTypeVariable
+            nextTypeVariable += 1
+            set(name, None)
+            name
+        }
+    }
+
+    private var nextTypeVariable = 0
 }
