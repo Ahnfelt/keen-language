@@ -181,6 +181,7 @@ class TypeInference {
                 typeVariables = oldTypeVariables
             case None =>
                 val scheme = generalize(valueType)
+                println("Inferred " + statement.name + " : " + scheme)
                 // Overwrite the monomorphic binding used inside the recursion
                 variables.set(statement.name, scheme)
         }
