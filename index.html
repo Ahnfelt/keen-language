@@ -23,6 +23,7 @@
                     return compiled;
                 } catch(e) {
                     document.getElementById('status').textContent = e;
+                    throw e;
                 }
             }
             function _saveCheck(program) {

@@ -12,7 +12,8 @@ object Parser {
 
     sealed abstract class Type
     case class FunctionType(parameters : List[Type], returns : Type) extends Type
-    case class VariableType(name : String) extends Type
+    case class RigidType(name : String) extends Type
+    case class NonRigidType(name : String) extends Type
     case class ConstructorType(name : String, fields : List[(String, Type)]) extends Type
     case class ConstantType(name : String, parameters : List[Type]) extends Type
     case class RecordType(fields : List[(String, Type)]) extends Type
@@ -396,7 +397,7 @@ object Parser {
         cursor.lookAhead() match {
             case LeftRound => parseParenthesisType(cursor)
             case Upper(_) => Success(List(require(parseConstantType(cursor))))
-            case Lower(name) => cursor.next(); Success(List(VariableType(name)))
+            case Lower(name) => cursor.next(); Success(List(RigidType(name)))
         }
     }
 

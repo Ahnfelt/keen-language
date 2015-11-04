@@ -15,7 +15,7 @@ object Main extends JSApp {
         val builder = new StringBuilder()
         Parser.parseProgram(cursor) match {
             case Success(parsed) =>
-                //new TypeCheck().checkProgram(parsed)
+                new TypeInference().checkProgram(parsed)
                 new Emitter({ s => builder.append(s); () }).emitProgram(parsed)
             case failure : Failure => throw failure
         }
