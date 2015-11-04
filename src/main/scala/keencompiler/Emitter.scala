@@ -213,6 +213,7 @@ class Emitter(emit : String => Unit) {
                     case PlusEquals => emit("+=")
                     case StarEquals => emit("*=")
                 }
+                emit(" ")
                 emitTerm(value)
                 emit(";\n")
             case TermStatement(term) =>
