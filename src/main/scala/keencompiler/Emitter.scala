@@ -199,7 +199,7 @@ class Emitter(emit : String => Unit) {
         statement match {
             case SumTypeStatement(name, parameters, constructors) =>
                 emit("// " + statement + "\n")
-            case VariableStatement(constructor, name, ofType, value) =>
+            case VariableStatement(name, ofType, value) =>
                 for(t <- ofType) emit("// : " + t + "\n")
                 emit("var " + mangle(name) + " = ")
                 emitTerm(value)

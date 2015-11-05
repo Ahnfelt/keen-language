@@ -9,24 +9,29 @@ class TypeInference {
 
     var typeVariables = new TypeVariables()
     var variables = new Variables()
+    var extracts = new Extracts()
     var sumTypes = new SumTypes()
 
     def checkPattern(pattern : Pattern) : Type = pattern match {
+        // TODO: Check exhaustiveness
         case WildcardPattern => NonRigidType(typeVariables.fresh())
         case VariablePattern(name) =>
             val resultType = NonRigidType(typeVariables.fresh())
             variables.set(name, Scheme(List(), resultType))
             resultType
-        case ExtractPattern(name, alias) =>
-            sumTypes.getByConstructor(name) match {
-                case None => throw new RuntimeException("Unknown constructor: " + name)
+        case ExtractPattern(constructorName, alias) =>
+            sumTypes.getByConstructor(constructorName) match {
+                case None => throw new RuntimeException("Unknown constructor: " + constructorName)
                 case Some(SumTypeStatement(typeName, expectedTypeParameters, constructors)) =>
-                    constructors.find(_._1 == name) match {
-                        case None => throw new RuntimeException("Unknown constructor: " + name + ", of type: " + typeName)
+                    constructors.find(_._1 == constructorName) match {
+                        case None => throw new RuntimeException("Unknown constructor: " + constructorName + ", of type: " + typeName)
                         case Some((_, expectedFields)) =>
-                            val extractedType = RecordType(expectedFields)
-                            for(x <- alias) variables.set(x, Scheme(List(), extractedType))
-                            ConstantType(typeName, List()) // TODO: Implement generics here
+                            val extractedType = ConstantType(typeName, expectedTypeParameters.map(_ => NonRigidType(typeVariables.fresh())))
+                            for(x <- alias) {
+                                variables.set(x, Scheme(List(), extractedType))
+                                extracts.set(x, constructorName)
+                            }
+                            extractedType
                     }
             }
         case ConstructorPattern(name, fields) =>
@@ -36,16 +41,19 @@ class TypeInference {
                     constructors.find(_._1 == name) match {
                         case None => throw new RuntimeException("Unknown constructor: " + name + ", of type: " + typeName)
                         case Some((_, expectedFields)) =>
+                            val freshParameters = expectedTypeParameters.map(x => x -> typeVariables.fresh())
+                            val constantType = ConstantType(typeName, freshParameters.map(t => NonRigidType(t._2)))
                             for(field <- fields) expectedFields.find(_._1 == field._1) match {
                                 case None => throw new RuntimeException("Unknown field: " + field._1 + ", for constructor: " + name)
-                                case Some((_, expectedType)) =>
+                                case Some((_, scheme)) =>
+                                    val fieldType = instantiate(Scheme(expectedTypeParameters, instantiate(scheme)), Some(freshParameters.toMap))
                                     val resultType = checkPattern(field._2)
-                                    unify(expectedType, resultType)
+                                    unify(fieldType, resultType)
                             }
                             if(expectedFields.length > fields.length) {
-                                throw new RuntimeException("Missing fields: " + (expectedFields.map(_._1).toSet - fields.map(_._1)).mkString(", ") + ", for constructor: " + name)
+                                throw new RuntimeException("Missing fields: " + (expectedFields.map(_._1).toSet -- fields.map(_._1)).mkString(", ") + ", for constructor: " + name)
                             }
-                            ConstantType(typeName, List()) // TODO: Implement generics here
+                            constantType
                     }
             }
         case RecordPattern(fields) =>
@@ -72,7 +80,7 @@ class TypeInference {
             val returnType = NonRigidType(typeVariables.fresh())
             val functionType = FunctionType(parameterTypes, returnType)
             for((patterns, statements) <- cases) {
-                val oldVariables = variables.copy
+                val (oldVariables, oldExtracts) = (variables.copy, extracts.copy)
                 // TODO: Check that variables do not occur twice in each case
                 if(!skipPatterns) {
                     if(firstPatterns.length != patterns.length) throw new RuntimeException("Expected " + firstPatterns.length + " patterns, but got " + patterns.length)
@@ -84,6 +92,7 @@ class TypeInference {
                 val resultType = checkStatements(statements)
                 unify(returnType, resultType)
                 variables = oldVariables
+                extracts = oldExtracts
             }
             functionType
         case Call(function, parameters) =>
@@ -100,20 +109,57 @@ class TypeInference {
                     constructors.find(_._1 == name) match {
                         case None => throw new RuntimeException("Unknown constructor: " + name + ", of type: " + typeName)
                         case Some((_, expectedFields)) =>
+                            val freshParameters = expectedTypeParameters.map(x => x -> typeVariables.fresh())
                             for(field <- fields) expectedFields.find(_._1 == field._1) match {
                                 case None => throw new RuntimeException("Unknown field: " + field._1 + ", for constructor: " + name)
-                                case Some((_, expectedType)) =>
+                                case Some((_, scheme)) =>
                                     val resultType = checkTerm(field._2)
-                                    unify(expectedType, resultType)
+                                    val oldTypeVariables = typeVariables.copy
+                                    unify(instantiate(Scheme(expectedTypeParameters, scheme.generalType), Some(freshParameters.toMap)), resultType)
+                                    typeVariables = oldTypeVariables
+                                    val fieldType = instantiate(Scheme(expectedTypeParameters, instantiate(scheme)), Some(freshParameters.toMap))
+                                    unify(fieldType, resultType)
                             }
                             if(expectedFields.length > fields.length) {
-                                throw new RuntimeException("Missing fields: " + (expectedFields.map(_._1).toSet - fields.map(_._1)).mkString(", ") + ", for constructor: " + name)
+                                throw new RuntimeException("Missing fields: " + (expectedFields.map(_._1).toSet -- fields.map(_._1)).mkString(", ") + ", for constructor: " + name)
                             }
-                            ConstantType(typeName, List()) // TODO: Implement generics here
+                            ConstantType(typeName, freshParameters.map(t => NonRigidType(t._2)))
                     }
             }
         case Field(record, label) =>
-            throw new RuntimeException("Fields not implemented yet: ." + label)
+            val recordType = expand(checkTerm(record))
+            recordType match {
+                case ConstantType(name, parameters) =>
+                    sumTypes.get(name) match {
+                        case None => throw new RuntimeException("Inferred non-existent type: " + recordType)
+                        case Some(statement) =>
+                            val extract = record match {
+                                case Variable(x) => extracts.get(x) match {
+                                    case None => None
+                                    case Some(constructorName) => statement.constructors.find(_._1 == constructorName) match {
+                                        case None => None
+                                        case Some(c) => Some(c)
+                                    }
+                                }
+                                case _ => None
+                            }
+                            val constructor = extract.getOrElse(statement.constructors match {
+                                case List(c) => c
+                                case _ => throw new RuntimeException("Can only access field ." + label + " of sum types with a single constructor, but got " + recordType)
+                            })
+                            constructor._2.find(_._1 == label) match {
+                                case None => throw new RuntimeException("No such field: ." + label + ", of " + recordType)
+                                case Some((_, scheme)) => instantiate(scheme)
+                            }
+                    }
+                case RecordType(fields) =>
+                    fields.find(_._1 == label) match {
+                        case None => throw new RuntimeException("No such field: ." + label)
+                        case Some((_, t)) => t
+                    }
+                case NonRigidType(name) => throw new RuntimeException("Type annotation needed for _ in: _." + label)
+                case _ => throw new RuntimeException("Not a record type: " + recordType)
+            }
         case Record(fields) =>
             // TODO: Check duplicate fields in record
             val fieldTypes = for((label, term) <- fields) yield label -> checkTerm(term)
@@ -152,6 +198,9 @@ class TypeInference {
             case Variable(name) => variables.get(name) match {
                 case None => throw new RuntimeException("Unknown variable: " + name)
                 case Some(scheme) =>
+                    if(scheme.parameters.nonEmpty) {
+                        throw new RuntimeException("Can't assign to a variable with polymorphic type: " + name)
+                    }
                     val expectedType = instantiate(scheme)
                     val resultType = checkTerm(statement.value)
                     unify(expectedType, resultType)
@@ -164,15 +213,16 @@ class TypeInference {
     def checkSumTypeDefinition(statement : SumTypeStatement) = {
         // TODO: Check that the types used in constructor parameters are defined
         if(sumTypes.get(statement.name).isDefined) throw new RuntimeException("Type already defined: " + statement.name)
-        sumTypes.set(statement.name, statement)
+        def createFieldSchemes(fields : List[(String, Scheme)]) : List[(String, Scheme)] = {
+            for((label, wrongScheme) <- fields) yield {
+                val free = freeRigid(wrongScheme.generalType) -- statement.parameters
+                label -> wrongScheme.copy(parameters = free.toList)
+            }
+        }
+        sumTypes.set(statement.name, statement.copy(constructors = statement.constructors.map(c => c._1 -> createFieldSchemes(c._2))))
     }
 
     def checkDefinition(statement : VariableStatement) : Unit = {
-        statement.constructor match {
-            case None => // OK
-            case Some(constructorName) => // TODO
-                throw new RuntimeException("Extractor patterns not implemented yet: " + constructorName + " " + statement.name)
-        }
         val valueType = checkTerm(statement.value)
         statement.ofType match {
             case Some(t) =>
@@ -182,8 +232,14 @@ class TypeInference {
             case None =>
                 val scheme = generalize(valueType)
                 println("Inferred " + statement.name + " : " + scheme)
-                // Overwrite the monomorphic binding used inside the recursion
-                variables.set(statement.name, scheme)
+                // Overwrites the monomorphic binding used inside the recursion
+                if(statement.value.isInstanceOf[Lambda]) {
+                    variables.set(statement.name, scheme)
+                } else {
+                    // Value restriction
+                    variables.set(statement.name, Scheme(List(), instantiate(scheme)))
+                }
+
         }
     }
 
@@ -194,12 +250,12 @@ class TypeInference {
                 RecordType(List())
             case definition : VariableStatement =>
                 // Prepare environment for mutual recursion
-                if(i == 0 || (statements(i - 1) match { case VariableStatement(_, _, _, _ : Lambda) => false; case _ => true })) {
+                if(i == 0 || (statements(i - 1) match { case VariableStatement(_, _, _ : Lambda) => false; case _ => true })) {
                     val recursive = statements.drop(i).map {
                         case s : VariableStatement => Some(s).filter(_.value.isInstanceOf[Lambda])
                         case _ => None
                     }.takeWhile(_.isDefined).map(_.get)
-                    for(VariableStatement(_, recursiveName, recursiveType, _) <- recursive) {
+                    for(VariableStatement(recursiveName, recursiveType, _) <- recursive) {
                         recursiveType match {
                             case None =>
                                 variables.set(recursiveName, Scheme(List(), NonRigidType(typeVariables.fresh())))
@@ -210,7 +266,7 @@ class TypeInference {
                 }
                 checkDefinition(definition)
                 if(!definition.value.isInstanceOf[Lambda] && definition.ofType.isDefined) {
-                    variables.set(definition.name, Scheme(List(), definition.ofType.get))
+                    variables.set(definition.name, Scheme(freeRigid(definition.ofType.get).toList, definition.ofType.get))
                 }
             case assign : AssignStatement =>
                 checkAssign(assign)
@@ -233,7 +289,12 @@ class TypeInference {
         case (NonRigidType(name1), t2) =>
             typeVariables.get(name1) match {
                 case None =>
-                    if(freeNonRigid(t2).contains(name1)) throw new RuntimeException("Unification loop: " + name1 + " = " + t2)
+                    if(freeNonRigid(t2).contains(name1)) {
+                        expand(t2) match {
+                            case NonRigidType(name2) if name1 == name2 => // OK
+                            case _ => throw new RuntimeException("Unification loop: " + name1 + " = " + expand(t2))
+                        }
+                    }
                     typeVariables.set(name1, t2)
                 case Some(t1) =>
                     unify(t1, t2)
@@ -241,10 +302,15 @@ class TypeInference {
         case (t1, NonRigidType(name2)) =>
             typeVariables.get(name2) match {
                 case None =>
-                    if(freeNonRigid(t1).contains(name2)) throw new RuntimeException("Unification loop: " + name2 + " = " + t1)
+                    if(freeNonRigid(t1).contains(name2)) {
+                        expand(t1) match {
+                            case NonRigidType(name1) if name1 == name2 => // OK
+                            case _ => throw new RuntimeException("Unification loop: " + name2 + " = " + expand(t1))
+                        }
+                    }
                     typeVariables.set(name2, t1)
                 case Some(t2) =>
-                    unify(t2, t1)
+                    unify(t1, t2)
             }
         case (FunctionType(parameters1, returns1), FunctionType(parameters2, returns2)) =>
             val ps1 = if(parameters1.isEmpty) List(RecordType(List())) else parameters1
@@ -264,7 +330,7 @@ class TypeInference {
                 if(field1._1 != field2._1) throw new RuntimeException("Unification expected field: " + field1._1 + ", but got: " + field2._1)
                 unify(field1._2, field2._2)
             }
-        case _ => throw new RuntimeException("Unification expected " + expected + ", but got " + actual)
+        case _ => throw new RuntimeException("Unification expected " + expand(expected) + ", but got " + expand(actual))
     }
 
     def environmentFreeNonRigid() : Set[String] = {
@@ -309,9 +375,9 @@ class TypeInference {
         case RecordType(fields) => RecordType(fields.map(field => field._1 -> expand(field._2)))
     }
 
-    def instantiate(scheme : Scheme) : Type = {
+    def instantiate(scheme : Scheme, fresh : Option[Map[String, String]] = None) : Type = {
         if(scheme.parameters.isEmpty) return scheme.generalType
-        val mapping = scheme.parameters.map(_ -> typeVariables.fresh()).toMap
+        val mapping = fresh.getOrElse(scheme.parameters.map(_ -> typeVariables.fresh())).toMap
         def go(t : Type) : Type = t match {
             case FunctionType(parameters, returns) => FunctionType(parameters.map(go), go(returns))
             case RigidType(name) =>
@@ -319,7 +385,6 @@ class TypeInference {
                     case None => t
                     case Some(typeVariableName) => NonRigidType(typeVariableName)
                 }
-            case ConstructorType(name, fields) => ConstructorType(name, fields.map { case (label, fieldType) => (label, go(fieldType)) })
             case ConstantType(name, parameters) => ConstantType(name, parameters.map(go))
             case RecordType(fields) => RecordType(fields.map { case (label, fieldType) => (label, go(fieldType)) })
             case NonRigidType(name) => typeVariables.get(name) match {
@@ -340,7 +405,6 @@ class TypeInference {
                     case None => NonRigidType(name)
                     case Some(typeVariableName) => RigidType(typeVariableName)
                 }
-            case ConstructorType(name, fields) => ConstructorType(name, fields.map { case (label, fieldType) => (label, go(fieldType)) })
             case ConstantType(name, parameters) => ConstantType(name, parameters.map(go))
             case RecordType(fields) => RecordType(fields.map { case (label, fieldType) => (label, go(fieldType)) })
         }
@@ -358,6 +422,12 @@ object TypeInference {
         def set(variable : String, scheme : Scheme) = map.put(variable, scheme)
         def copy = new Variables(mutable.HashMap(map.toSeq : _*))
         def all : List[(String, Scheme)] = map.toList
+    }
+
+    class Extracts(map : mutable.HashMap[String, String] = mutable.HashMap()) {
+        def get(variable : String) : Option[String] = map.get(variable)
+        def set(variable : String, constructor : String) = map.put(variable, constructor)
+        def copy = new Extracts(mutable.HashMap(map.toSeq : _*))
     }
 
     class SumTypes(map : mutable.HashMap[String, SumTypeStatement] = mutable.HashMap()) {

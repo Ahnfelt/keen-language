@@ -1,6 +1,7 @@
 package keencompiler
 
 import Tokenizer.Token
+import keencompiler.TypeInference.Scheme
 
 import scala.collection.mutable.ListBuffer
 
@@ -14,13 +15,14 @@ object Parser {
     case class FunctionType(parameters : List[Type], returns : Type) extends Type
     case class RigidType(name : String) extends Type
     case class NonRigidType(name : String) extends Type
-    case class ConstructorType(name : String, fields : List[(String, Type)]) extends Type
     case class ConstantType(name : String, parameters : List[Type]) extends Type
     case class RecordType(fields : List[(String, Type)]) extends Type
 
+    case class ConstructorDefinition(name : String, fields : List[(String, Type)])
+
     sealed abstract class Statement
-    case class SumTypeStatement(name : String, parameters : List[String], constructors : List[(String, List[(String, Type)])]) extends Statement
-    case class VariableStatement(constructor : Option[String], name : String, ofType : Option[Type], value : Term) extends Statement
+    case class SumTypeStatement(name : String, parameters : List[String], constructors : List[(String, List[(String, Scheme)])]) extends Statement
+    case class VariableStatement(name : String, ofType : Option[Type], value : Term) extends Statement
     case class AssignStatement(term : Term, operator : Token, value : Term) extends Statement
     case class TermStatement(term : Term) extends Statement
 
@@ -380,16 +382,16 @@ object Parser {
         }
     }
 
-    def parseConstructorType(cursor : TokenCursor) : Result[ConstructorType] = {
+    def parseConstructorDefinition(cursor : TokenCursor) : Result[ConstructorDefinition] = {
         val name = cursor.next() match {
             case Upper(x) => x
             case _ => return Failure("Expected type constructor")
         }
         if(cursor.lookAhead() != LeftRound) {
-            Success(ConstructorType(name, List()))
+            Success(ConstructorDefinition(name, List()))
         } else {
             val record = require(parseRecordType(cursor))
-            Success(ConstructorType(name, record.fields))
+            Success(ConstructorDefinition(name, record.fields))
         }
     }
 
@@ -421,8 +423,8 @@ object Parser {
                     case Colon => List[String]()
                     case LessThan =>
                         def nextParameter() = cursor.next() match {
-                            case Upper(x) => x
-                            case _ => throw new RuntimeException("Expected an uppercase type parameter")
+                            case Lower(x) => x
+                            case _ => throw new RuntimeException("Expected a lowercase type parameter")
                         }
                         val initial = nextParameter()
                         val list = ListBuffer(initial)
@@ -436,16 +438,16 @@ object Parser {
                 }
                 if(cursor.next() != Equals) throw new RuntimeException("Expected '='")
                 if(cursor.next() != LeftSquare) throw new RuntimeException("Expected '['")
-                val constructors = ListBuffer[ConstructorType]()
+                val constructors = ListBuffer[ConstructorDefinition]()
                 if(cursor.lookAhead() != RightSquare) {
-                    constructors += require(parseConstructorType(cursor))
+                    constructors += require(parseConstructorDefinition(cursor))
                     while(cursor.lookAhead() == Comma) {
                         cursor.next()
-                        constructors += require(parseConstructorType(cursor))
+                        constructors += require(parseConstructorDefinition(cursor))
                     }
                 }
                 if(cursor.next() != RightSquare) throw new RuntimeException("Expected ']'")
-                Success(SumTypeStatement(name, parameters, constructors.toList.map(t => t.name -> t.fields)))
+                Success(SumTypeStatement(name, parameters, constructors.toList.map(t => t.name -> t.fields.map(f => f._1 -> Scheme(List(), f._2)))))
             case _ =>
                 Failure("Expected identifier followed by :")
         }
@@ -457,13 +459,7 @@ object Parser {
                 val valueType = if(cursor.lookAhead() != Equals) Some(require(parseType(cursor))) else None
                 if(cursor.next() != Equals) throw new RuntimeException("Expected '='")
                 val value = require(parseTerm(cursor))
-                Success(VariableStatement(None, name, valueType, value))
-            case (Upper(constructor), Lower(name)) =>
-                if(cursor.next() != Colon) throw new RuntimeException("Expected ':'")
-                val valueType = if(cursor.lookAhead() != Equals) Some(require(parseType(cursor))) else None
-                if(cursor.next() != Equals) throw new RuntimeException("Expected '='")
-                val value = require(parseTerm(cursor))
-                Success(VariableStatement(Some(constructor), name, valueType, value))
+                Success(VariableStatement(name, valueType, value))
             case _ =>
                 Failure("Expected identifier followed by :")
         }
@@ -483,7 +479,6 @@ object Parser {
     def parseStatement(cursor : TokenCursor) : Result[Statement] = {
         (cursor.lookAhead(), cursor.nextLookAhead(), cursor.nextNextLookAhead()) match {
             case (Upper(_), token, _) if token == LessThan || token == Colon => parseSumTypeStatement(cursor)
-            case (Upper(_), Lower(_), Colon) => parseVariableStatement(cursor)
             case (Lower(_), Colon, _) => parseVariableStatement(cursor)
             case (Lower(_), o, _) if o == Equals || o == MinusEquals || o == PlusEquals || o == StarEquals => parseAssignStatement(cursor)
             case (Sharp(_), _, _) => // Treat imports etc. as single line comments for now
