@@ -41,8 +41,8 @@ class TypeInference {
                     constructors.find(_._1 == name) match {
                         case None => throw new RuntimeException("Unknown constructor: " + name + ", of type: " + typeName)
                         case Some((_, expectedFields)) =>
-                            val freshParameters = expectedTypeParameters.map(x => x -> typeVariables.fresh())
-                            val constantType = ConstantType(typeName, freshParameters.map(t => NonRigidType(t._2)))
+                            val freshParameters = expectedTypeParameters.map(x => x -> NonRigidType(typeVariables.fresh()))
+                            val constantType = ConstantType(typeName, freshParameters.map(t => t._2))
                             for(field <- fields) expectedFields.find(_._1 == field._1) match {
                                 case None => throw new RuntimeException("Unknown field: " + field._1 + ", for constructor: " + name)
                                 case Some((_, scheme)) =>
@@ -109,7 +109,7 @@ class TypeInference {
                     constructors.find(_._1 == name) match {
                         case None => throw new RuntimeException("Unknown constructor: " + name + ", of type: " + typeName)
                         case Some((_, expectedFields)) =>
-                            val freshParameters = expectedTypeParameters.map(x => x -> typeVariables.fresh())
+                            val freshParameters = expectedTypeParameters.map(x => x -> NonRigidType(typeVariables.fresh()))
                             for(field <- fields) expectedFields.find(_._1 == field._1) match {
                                 case None => throw new RuntimeException("Unknown field: " + field._1 + ", for constructor: " + name)
                                 case Some((_, scheme)) =>
@@ -123,7 +123,8 @@ class TypeInference {
                             if(expectedFields.length > fields.length) {
                                 throw new RuntimeException("Missing fields: " + (expectedFields.map(_._1).toSet -- fields.map(_._1)).mkString(", ") + ", for constructor: " + name)
                             }
-                            ConstantType(typeName, freshParameters.map(t => NonRigidType(t._2)))
+                            println("Constructor: " + expand(ConstantType(typeName, freshParameters.map(_._2))))
+                            ConstantType(typeName, freshParameters.map(_._2))
                     }
             }
         case Field(record, label) =>
@@ -149,7 +150,7 @@ class TypeInference {
                             })
                             constructor._2.find(_._1 == label) match {
                                 case None => throw new RuntimeException("No such field: ." + label + ", of " + recordType)
-                                case Some((_, scheme)) => instantiate(scheme)
+                                case Some((_, scheme)) => instantiate(Scheme(statement.parameters, instantiate(scheme)), Some((statement.parameters zip parameters).toMap))
                             }
                     }
                 case RecordType(fields) =>
@@ -196,7 +197,7 @@ class TypeInference {
     def checkAssign(statement : AssignStatement) : Type = {
         statement.term match {
             case Variable(name) => variables.get(name) match {
-                case None => throw new RuntimeException("Unknown variable: " + name)
+                case None => throw new RuntimeException("Can't assign to an undeclared variable: " + name)
                 case Some(scheme) =>
                     if(scheme.parameters.nonEmpty) {
                         throw new RuntimeException("Can't assign to a variable with polymorphic type: " + name)
@@ -231,12 +232,13 @@ class TypeInference {
                 typeVariables = oldTypeVariables
             case None =>
                 val scheme = generalize(valueType)
-                println("Inferred " + statement.name + " : " + scheme)
-                // Overwrites the monomorphic binding used inside the recursion
                 if(statement.value.isInstanceOf[Lambda]) {
+                    // Overwrites the monomorphic binding used inside the recursion
+                    println("Inferred " + statement.name + " : " + scheme)
                     variables.set(statement.name, scheme)
                 } else {
                     // Value restriction
+                    println("Inferred: " + statement.name + " : " + instantiate(scheme))
                     variables.set(statement.name, Scheme(List(), instantiate(scheme)))
                 }
 
@@ -266,7 +268,9 @@ class TypeInference {
                 }
                 checkDefinition(definition)
                 if(!definition.value.isInstanceOf[Lambda] && definition.ofType.isDefined) {
-                    variables.set(definition.name, Scheme(freeRigid(definition.ofType.get).toList, definition.ofType.get))
+                    val free = freeRigid(definition.ofType.get).toList
+                    if(free.nonEmpty) throw new RuntimeException("Only lambda functions can have a polymorphic type annotation")
+                    variables.set(definition.name, Scheme(free, definition.ofType.get))
                 }
             case assign : AssignStatement =>
                 checkAssign(assign)
@@ -294,8 +298,9 @@ class TypeInference {
                             case NonRigidType(name2) if name1 == name2 => // OK
                             case _ => throw new RuntimeException("Unification loop: " + name1 + " = " + expand(t2))
                         }
+                    } else {
+                        typeVariables.set(name1, t2)
                     }
-                    typeVariables.set(name1, t2)
                 case Some(t1) =>
                     unify(t1, t2)
             }
@@ -307,8 +312,9 @@ class TypeInference {
                             case NonRigidType(name1) if name1 == name2 => // OK
                             case _ => throw new RuntimeException("Unification loop: " + name2 + " = " + expand(t1))
                         }
+                    } else {
+                        typeVariables.set(name2, t1)
                     }
-                    typeVariables.set(name2, t1)
                 case Some(t2) =>
                     unify(t1, t2)
             }
@@ -375,15 +381,15 @@ class TypeInference {
         case RecordType(fields) => RecordType(fields.map(field => field._1 -> expand(field._2)))
     }
 
-    def instantiate(scheme : Scheme, fresh : Option[Map[String, String]] = None) : Type = {
+    def instantiate(scheme : Scheme, fresh : Option[Map[String, Type]] = None) : Type = {
         if(scheme.parameters.isEmpty) return scheme.generalType
-        val mapping = fresh.getOrElse(scheme.parameters.map(_ -> typeVariables.fresh())).toMap
+        val mapping = fresh.getOrElse(scheme.parameters.map(_ -> NonRigidType(typeVariables.fresh()))).toMap
         def go(t : Type) : Type = t match {
             case FunctionType(parameters, returns) => FunctionType(parameters.map(go), go(returns))
             case RigidType(name) =>
                 mapping.get(name) match {
                     case None => t
-                    case Some(typeVariableName) => NonRigidType(typeVariableName)
+                    case Some(toType) => toType
                 }
             case ConstantType(name, parameters) => ConstantType(name, parameters.map(go))
             case RecordType(fields) => RecordType(fields.map { case (label, fieldType) => (label, go(fieldType)) })
