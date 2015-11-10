@@ -1,7 +1,6 @@
 package keencompiler
 
 import Tokenizer.Token
-import keencompiler.TypeInference.Scheme
 
 import scala.collection.mutable.ListBuffer
 
@@ -12,19 +11,48 @@ object Parser {
     // Polymorphic fields, eg. t1.f : Int -> Int, t1.f : String -> String is reduced to t1.f : forall a. a -> a
 
     sealed abstract class Type
-    case class FunctionType(parameters : List[Type], returns : Type) extends Type
-    case class RigidType(name : String) extends Type
-    case class NonRigidType(name : String) extends Type
-    case class ConstantType(name : String, parameters : List[Type]) extends Type
-    case class RecordType(fields : List[(String, Type)]) extends Type
+    case class FunctionType(parameters : List[Type], returns : Type) extends Type {
+        override def toString = {
+            val parametersString = parameters match {
+                case List(p : FunctionType) => "(" + p.toString + ")"
+                case List(p) => p.toString
+                case _ => "(" + parameters.map(_.toString).mkString(", ") + ")"
+            }
+            parametersString + " -> " + returns.toString
+        }
+    }
+    case class RigidType(name : String) extends Type { override def toString = name }
+    case class NonRigidType(name : String) extends Type { override def toString = name }
+    case class ConstantType(name : String, parameters : List[Type]) extends Type {
+        override def toString = {
+            val parametersString = parameters match { case List() => ""; case _ => "<" + parameters.map(_.toString).mkString(", ") + ">" }
+            name + parametersString
+        }
+    }
+    case class RecordType(fields : List[(String, Type)]) extends Type {
+        override def toString = {
+            "(" +
+            (for((label, t) <- fields) yield label + " : " + t).mkString(", ") +
+            ")"
+        }
+    }
 
     case class ConstructorDefinition(name : String, fields : List[(String, Type)])
 
     sealed abstract class Statement
     case class SumTypeStatement(name : String, parameters : List[String], constructors : List[(String, List[(String, Scheme)])]) extends Statement
-    case class VariableStatement(name : String, ofType : Option[Type], value : Term) extends Statement
+    case class VariableStatement(name : String, scheme : Option[Scheme], value : Term) extends Statement
     case class AssignStatement(term : Term, operator : Token, value : Term) extends Statement
     case class TermStatement(term : Term) extends Statement
+
+    case class FieldConstraint(label : String, fieldType : Type)
+
+    case class Scheme(parameters : List[String], fieldConstraints : List[(String, FieldConstraint)], generalType : Type) {
+        override def toString : String = {
+            generalType.toString +
+                fieldConstraints.map { case (k, v) => " & " + k + "." + v.label + " : " + v.fieldType }.mkString
+        }
+    }
 
     sealed abstract class Pattern
     case object WildcardPattern extends Pattern
@@ -416,6 +444,36 @@ object Parser {
 
     def parseType(cursor : TokenCursor) : Result[Type] = parseFunctionType(cursor)
 
+    def parseScheme(cursor : TokenCursor) : Result[Scheme] = {
+        def free(inType : Type) : Set[String] = inType match {
+            case FunctionType(parameters, returns) => parameters.flatMap(free).toSet ++ free(returns)
+            case RigidType(name) => Set(name)
+            case NonRigidType(name) => throw new RuntimeException("Unexpected non-rigid type in type annotation: " + name)
+            case ConstantType(name, parameters) => parameters.flatMap(free).toSet
+            case RecordType(fields) => fields.flatMap(f => free(f._2)).toSet
+        }
+        val generalType = require(parseType(cursor))
+        var typeParameters = free(generalType)
+        val fieldConstraints = ListBuffer[(String, FieldConstraint)]()
+        while(cursor.lookAhead() == Ampersand) {
+            cursor.next()
+            val record = cursor.next() match {
+                case Lower(text) => text
+                case _ => throw new RuntimeException("Expected a lowercase type parameter")
+            }
+            if(cursor.next() != Dot) throw new RuntimeException("Expected a dot")
+            val label = cursor.next() match {
+                case Lower(text) => text
+                case _ => throw new RuntimeException("Expected a lowercase field")
+            }
+            if(cursor.next() != Colon) throw new RuntimeException("Expected a colon")
+            val fieldType = require(parseType(cursor))
+            typeParameters ++= (Set(record) ++ free(fieldType))
+            fieldConstraints += (record -> FieldConstraint(label, fieldType))
+        }
+        Success(Scheme(typeParameters.toList.sorted, fieldConstraints.toList, generalType))
+    }
+
     def parseSumTypeStatement(cursor : TokenCursor) : Result[SumTypeStatement] = {
         cursor.next() match {
             case Upper(name) =>
@@ -447,7 +505,7 @@ object Parser {
                     }
                 }
                 if(cursor.next() != RightSquare) throw new RuntimeException("Expected ']'")
-                Success(SumTypeStatement(name, parameters, constructors.toList.map(t => t.name -> t.fields.map(f => f._1 -> Scheme(List(), f._2)))))
+                Success(SumTypeStatement(name, parameters, constructors.toList.map(t => t.name -> t.fields.map(f => f._1 -> Scheme(List(), List(), f._2)))))
             case _ =>
                 Failure("Expected identifier followed by :")
         }
@@ -456,10 +514,10 @@ object Parser {
     def parseVariableStatement(cursor : TokenCursor) : Result[VariableStatement] = {
         (cursor.next(), cursor.next()) match {
             case (Lower(name), Colon) =>
-                val valueType = if(cursor.lookAhead() != Equals) Some(require(parseType(cursor))) else None
+                val scheme = if(cursor.lookAhead() != Equals) Some(require(parseScheme(cursor))) else None
                 if(cursor.next() != Equals) throw new RuntimeException("Expected '='")
                 val value = require(parseTerm(cursor))
-                Success(VariableStatement(name, valueType, value))
+                Success(VariableStatement(name, scheme, value))
             case _ =>
                 Failure("Expected identifier followed by :")
         }

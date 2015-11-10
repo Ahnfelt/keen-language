@@ -80,6 +80,7 @@ class Emitter(emit : String => Unit) {
         if(statements.nonEmpty) {
             for(s <- statements.init) emitStatement(s)
             statements.last match {
+                case TermStatement(Record(List())) => // OK
                 case TermStatement(term) => emit("return "); emitTerm(term)
                 case statement => emitStatement(statement)
             }
@@ -134,6 +135,9 @@ class Emitter(emit : String => Unit) {
                     emitTerm(p)
                 }
                 emit("}")
+            case Call(function, List(Record(List()))) =>
+                emitTerm(function)
+                emit("()")
             case Call(function, parameters) =>
                 emitTerm(function)
                 emit("(")
@@ -145,6 +149,8 @@ class Emitter(emit : String => Unit) {
             case Field(record, label) =>
                 emitTerm(record)
                 emit(mangleLabelUsage(label))
+            case Record(List()) =>
+                emit("(void 0)")
             case Record(fields) =>
                 emit("{")
                 for(((label, value), i) <- fields.zipWithIndex) {

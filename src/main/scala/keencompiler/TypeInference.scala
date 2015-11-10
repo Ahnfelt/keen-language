@@ -8,6 +8,7 @@ import scala.collection.mutable
 class TypeInference {
 
     var typeVariables = new TypeVariables()
+    var fieldConstraints = new FieldConstraints()
     var variables = new Variables()
     var extracts = new Extracts()
     var sumTypes = new SumTypes()
@@ -17,7 +18,7 @@ class TypeInference {
         case WildcardPattern => NonRigidType(typeVariables.fresh())
         case VariablePattern(name) =>
             val resultType = NonRigidType(typeVariables.fresh())
-            variables.set(name, Scheme(List(), resultType))
+            variables.set(name, Scheme(List(), List(), resultType))
             resultType
         case ExtractPattern(constructorName, alias) =>
             sumTypes.getByConstructor(constructorName) match {
@@ -28,7 +29,7 @@ class TypeInference {
                         case Some((_, expectedFields)) =>
                             val extractedType = ConstantType(typeName, expectedTypeParameters.map(_ => NonRigidType(typeVariables.fresh())))
                             for(x <- alias) {
-                                variables.set(x, Scheme(List(), extractedType))
+                                variables.set(x, Scheme(List(), List(), extractedType))
                                 extracts.set(x, constructorName)
                             }
                             extractedType
@@ -46,7 +47,8 @@ class TypeInference {
                             for(field <- fields) expectedFields.find(_._1 == field._1) match {
                                 case None => throw new RuntimeException("Unknown field: " + field._1 + ", for constructor: " + name)
                                 case Some((_, scheme)) =>
-                                    val fieldType = instantiate(Scheme(expectedTypeParameters, instantiate(scheme)), Some(freshParameters.toMap))
+                                    // TODO: Is the empty list of field constraints correct?
+                                    val fieldType = instantiate(Scheme(expectedTypeParameters, List(), instantiate(scheme)), Some(freshParameters.toMap))
                                     val resultType = checkPattern(field._2)
                                     unify(fieldType, resultType)
                             }
@@ -57,9 +59,13 @@ class TypeInference {
                     }
             }
         case RecordPattern(fields) =>
-            // TODO: Check duplicate fields in record
-            val fieldTypes = for((label, pattern) <- fields) yield label -> checkPattern(pattern)
-            RecordType(fieldTypes)
+            fields.groupBy(_._2).filter(_._2.length > 1).foreach(f => throw new RuntimeException("Duplicated field in pattern: " + f._2.head._1))
+            val resultType = NonRigidType(typeVariables.fresh())
+            for((label, pattern) <- fields) yield {
+                val fieldType = checkPattern(pattern)
+                fieldConstraints.add(resultType, FieldConstraint(label, fieldType))
+            }
+            resultType
         case ArrayPattern(elements) =>
             val elementType = NonRigidType(typeVariables.fresh())
             for(element <- elements) unify(elementType, checkPattern(element))
@@ -115,15 +121,16 @@ class TypeInference {
                                 case Some((_, scheme)) =>
                                     val resultType = checkTerm(field._2)
                                     val oldTypeVariables = typeVariables.copy
-                                    unify(instantiate(Scheme(expectedTypeParameters, scheme.generalType), Some(freshParameters.toMap)), resultType)
+                                    // TODO: Is the empty list of field constraints correct?
+                                    unify(instantiate(Scheme(expectedTypeParameters, List(), scheme.generalType), Some(freshParameters.toMap)), resultType)
                                     typeVariables = oldTypeVariables
-                                    val fieldType = instantiate(Scheme(expectedTypeParameters, instantiate(scheme)), Some(freshParameters.toMap))
+                                    // TODO: Is the empty list of field constraints correct?
+                                    val fieldType = instantiate(Scheme(expectedTypeParameters, List(), instantiate(scheme)), Some(freshParameters.toMap))
                                     unify(fieldType, resultType)
                             }
                             if(expectedFields.length > fields.length) {
                                 throw new RuntimeException("Missing fields: " + (expectedFields.map(_._1).toSet -- fields.map(_._1)).mkString(", ") + ", for constructor: " + name)
                             }
-                            println("Constructor: " + expand(ConstantType(typeName, freshParameters.map(_._2))))
                             ConstantType(typeName, freshParameters.map(_._2))
                     }
             }
@@ -150,7 +157,8 @@ class TypeInference {
                             })
                             constructor._2.find(_._1 == label) match {
                                 case None => throw new RuntimeException("No such field: ." + label + ", of " + recordType)
-                                case Some((_, scheme)) => instantiate(Scheme(statement.parameters, instantiate(scheme)), Some((statement.parameters zip parameters).toMap))
+                                // TODO: Is the empty list of field constraints correct?
+                                case Some((_, scheme)) => instantiate(Scheme(statement.parameters, List(), instantiate(scheme)), Some((statement.parameters zip parameters).toMap))
                             }
                     }
                 case RecordType(fields) =>
@@ -158,7 +166,12 @@ class TypeInference {
                         case None => throw new RuntimeException("No such field: ." + label)
                         case Some((_, t)) => t
                     }
-                case NonRigidType(name) => throw new RuntimeException("Type annotation needed for _ in: _." + label)
+                case NonRigidType(name) =>
+                    val resultType = NonRigidType(typeVariables.fresh())
+                    fieldConstraints.add(NonRigidType(name), FieldConstraint(label, resultType))
+                    resultType
+                case RigidType(name) =>
+                    throw new RuntimeException("Not implemented yet: Fields on rigid types: " + name + "." + label)
                 case _ => throw new RuntimeException("Not a record type: " + recordType)
             }
         case Record(fields) =>
@@ -225,21 +238,25 @@ class TypeInference {
 
     def checkDefinition(statement : VariableStatement) : Unit = {
         val valueType = checkTerm(statement.value)
-        statement.ofType match {
-            case Some(t) =>
+        statement.scheme match {
+            case Some(s) =>
                 val oldTypeVariables = typeVariables.copy
-                unify(t, valueType)
+                val oldFieldConstraints = fieldConstraints.copy
+                for((a, c) <- s.fieldConstraints) fieldConstraints.addRigid(a, c.label, c.fieldType)
+                unify(s.generalType, valueType)
+                fieldConstraints = oldFieldConstraints
                 typeVariables = oldTypeVariables
             case None =>
-                val scheme = generalize(valueType)
                 if(statement.value.isInstanceOf[Lambda]) {
+                    // TODO: Only generalize once all the mutual recursion is done - right now recursion causes monomorphic types to be inferred
+                    val scheme = generalize(valueType)
                     // Overwrites the monomorphic binding used inside the recursion
-                    println("Inferred " + statement.name + " : " + scheme)
+                    println(statement.name + " : " + scheme)
                     variables.set(statement.name, scheme)
                 } else {
                     // Value restriction
-                    println("Inferred: " + statement.name + " : " + instantiate(scheme))
-                    variables.set(statement.name, Scheme(List(), instantiate(scheme)))
+                    println(statement.name + " : " + valueType)
+                    variables.set(statement.name, Scheme(List(), List(), valueType))
                 }
 
         }
@@ -257,20 +274,19 @@ class TypeInference {
                         case s : VariableStatement => Some(s).filter(_.value.isInstanceOf[Lambda])
                         case _ => None
                     }.takeWhile(_.isDefined).map(_.get)
-                    for(VariableStatement(recursiveName, recursiveType, _) <- recursive) {
-                        recursiveType match {
+                    for(VariableStatement(recursiveName, recursiveScheme, _) <- recursive) {
+                        recursiveScheme match {
                             case None =>
-                                variables.set(recursiveName, Scheme(List(), NonRigidType(typeVariables.fresh())))
-                            case Some(t) =>
-                                variables.set(recursiveName, Scheme(freeRigid(t).toList, t))
+                                variables.set(recursiveName, Scheme(List(), List(), NonRigidType(typeVariables.fresh())))
+                            case Some(s) =>
+                                variables.set(recursiveName, s)
                         }
                     }
                 }
                 checkDefinition(definition)
-                if(!definition.value.isInstanceOf[Lambda] && definition.ofType.isDefined) {
-                    val free = freeRigid(definition.ofType.get).toList
-                    if(free.nonEmpty) throw new RuntimeException("Only lambda functions can have a polymorphic type annotation")
-                    variables.set(definition.name, Scheme(free, definition.ofType.get))
+                if(!definition.value.isInstanceOf[Lambda] && definition.scheme.isDefined) {
+                    if(definition.scheme.get.parameters.nonEmpty) throw new RuntimeException("Only lambda functions can have a polymorphic type annotation")
+                    variables.set(definition.name, definition.scheme.get)
                 }
             case assign : AssignStatement =>
                 checkAssign(assign)
@@ -300,6 +316,7 @@ class TypeInference {
                         }
                     } else {
                         typeVariables.set(name1, t2)
+                        fieldConstraints.bind(name1, t2)
                     }
                 case Some(t1) =>
                     unify(t1, t2)
@@ -314,6 +331,7 @@ class TypeInference {
                         }
                     } else {
                         typeVariables.set(name2, t1)
+                        fieldConstraints.bind(name2, t1)
                     }
                 case Some(t2) =>
                     unify(t1, t2)
@@ -398,11 +416,22 @@ class TypeInference {
                 case Some(typeLookedUp) => go(typeLookedUp)
             }
         }
+        for((name, c) <- scheme.fieldConstraints) {
+            fieldConstraints.add(mapping(name), c.copy(fieldType = go(c.fieldType)))
+        }
         go(scheme.generalType)
     }
 
     def generalize(inferredType : Type) : Scheme = {
-        val typeParameters = (freeNonRigid(inferredType) -- environmentFreeNonRigid()).toList.map(_ -> typeVariables.fresh()).toMap
+        val niceNames = "abcdefghijklmnopqrstuvwxyz".toIterator.map("" + _) ++ Iterator.from(1).map("t" + _)
+        val freeInType = freeNonRigid(inferredType)
+        def findFreeInConstraints(oldSet : Set[String]) : Set[String] = {
+            val newSet = oldSet ++ (for(name <- oldSet; c <- fieldConstraints.get(NonRigidType(name))) yield freeNonRigid(c.fieldType)).flatten
+            if(oldSet == newSet) oldSet else findFreeInConstraints(newSet)
+        }
+        val freeInConstraints = findFreeInConstraints(freeInType)
+        val free = (freeInType ++ freeInConstraints) -- environmentFreeNonRigid()
+        val typeParameters = free.toIterator.zip(niceNames).toMap
         def go(t : Type) : Type = t match {
             case FunctionType(parameters, returns) => FunctionType(parameters.map(go), go(returns))
             case RigidType(name) => RigidType(name)
@@ -415,17 +444,67 @@ class TypeInference {
             case RecordType(fields) => RecordType(fields.map { case (label, fieldType) => (label, go(fieldType)) })
         }
         val generalType = go(expand(inferredType))
-        Scheme(typeParameters.values.toList, generalType)
+        val constraints = for((name, rigid) <- typeParameters.toList; c <- fieldConstraints.get(NonRigidType(name))) yield rigid -> c.copy(fieldType = go(expand(c.fieldType)))
+        Scheme(typeParameters.values.toList, constraints, generalType)
+    }
+
+
+    class FieldConstraints(map : mutable.HashMap[String, List[FieldConstraint]] = mutable.HashMap(), rigids : mutable.HashMap[(String, String), Type] = mutable.HashMap()) {
+        def get(nonRigid : NonRigidType) : List[FieldConstraint] = map.get(nonRigid.name).toList.flatten
+        def add(recordType : Type, constraint : FieldConstraint) = expand(recordType) match {
+            case NonRigidType(name) =>
+                map.put(name, constraint :: map.getOrElse(name, List()))
+            case t =>
+                checkFieldConstraint(t, constraint)
+        }
+        def bind(nonRigid : String, newType : Type) = expand(newType) match {
+            case NonRigidType(name) =>
+                for(c <- map.getOrElse(nonRigid, List())) add(NonRigidType(name), c)
+                map.remove(nonRigid)
+            case t =>
+                for(c <- map.getOrElse(nonRigid, List())) checkFieldConstraint(t, c)
+                map.remove(nonRigid)
+        }
+        def addRigid(rigid : String, label : String, fieldType : Type) : Unit = {
+            rigids.put(rigid -> label, fieldType)
+        }
+        def copy = new FieldConstraints(mutable.HashMap(map.toSeq : _*), mutable.HashMap(rigids.toSeq : _*))
+        def all : List[(String, List[FieldConstraint])] = map.toList
+
+
+        private def checkFieldConstraint(expandedType : Type, constraint : FieldConstraint) : Unit = expandedType match {
+            case FunctionType(parameters, returns) => throw new RuntimeException("Function type can't have field: ." + constraint.label)
+            case RigidType(name) => rigids.get(name -> constraint.label) match {
+                case None => throw new RuntimeException("Rigid type variable doesn't have field: " + name + "." + constraint.label)
+                case Some(t) => unify(t, constraint.fieldType)
+            }
+            case NonRigidType(name) => throw new RuntimeException("This function shouldn't be called on non-rigid types: " + name + "." + constraint.label)
+            case RecordType(fields) => fields.find(_._1 == constraint.label) match {
+                case None => throw new RuntimeException("Record type doesn't have field: ." + constraint.label)
+                case Some((_, t)) => unify(constraint.fieldType, t)
+            }
+            case ConstantType(name, parameters) =>
+                val statement = sumTypes.get(name).getOrElse(throw new RuntimeException("No such type: " + name))
+                val constructor = statement.constructors match {
+                    case List(c) => c
+                    case List() => throw new RuntimeException("Can't access field of sum type with no constructors: " + name + "." + constraint.label)
+                    case _ => throw new RuntimeException("Can't access field of multi-constructor sum type: " + name + "." + constraint.label)
+                }
+                constructor._2.find(_._1 == constraint.label) match {
+                    case None => throw new RuntimeException("No such field: ." + constraint.label + ", of " + name)
+                    // TODO: Is the empty list of field constraints correct?
+                    case Some((_, scheme)) => instantiate(Scheme(statement.parameters, List(), instantiate(scheme)), Some((statement.parameters zip parameters).toMap))
+                }
+        }
     }
 }
 
 object TypeInference {
 
-    case class Scheme(parameters : List[String], generalType : Type)
-
     class Variables(map : mutable.HashMap[String, Scheme] = mutable.HashMap()) {
         def get(variable : String) : Option[Scheme] = map.get(variable)
         def set(variable : String, scheme : Scheme) = map.put(variable, scheme)
+        def remove(variable : String) = map.remove(variable)
         def copy = new Variables(mutable.HashMap(map.toSeq : _*))
         def all : List[(String, Scheme)] = map.toList
     }
@@ -441,6 +520,7 @@ object TypeInference {
         def set(name : String, statement : SumTypeStatement) = map.put(name, statement)
         def copy = new SumTypes(mutable.HashMap(map.toSeq : _*))
         def getByConstructor(name : String) : Option[SumTypeStatement] = map.find(_._2.constructors.exists(_._1 == name)).map(_._2)
+        def all : List[(String, SumTypeStatement)] = map.toList
     }
 
     class TypeVariables(map : mutable.HashMap[String, Type] = mutable.HashMap()) {
