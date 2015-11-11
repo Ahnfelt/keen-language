@@ -47,7 +47,6 @@ class TypeInference {
                             for(field <- fields) expectedFields.find(_._1 == field._1) match {
                                 case None => throw new RuntimeException("Unknown field: " + field._1 + ", for constructor: " + name)
                                 case Some((_, scheme)) =>
-                                    // TODO: Is the empty list of field constraints correct?
                                     val fieldType = instantiate(Scheme(expectedTypeParameters, List(), instantiate(scheme)), Some(freshParameters.toMap))
                                     val resultType = checkPattern(field._2)
                                     unify(fieldType, resultType)
@@ -121,10 +120,8 @@ class TypeInference {
                                 case Some((_, scheme)) =>
                                     val resultType = checkTerm(field._2)
                                     val oldTypeVariables = typeVariables.copy
-                                    // TODO: Is the empty list of field constraints correct?
                                     unify(instantiate(Scheme(expectedTypeParameters, List(), scheme.generalType), Some(freshParameters.toMap)), resultType)
                                     typeVariables = oldTypeVariables
-                                    // TODO: Is the empty list of field constraints correct?
                                     val fieldType = instantiate(Scheme(expectedTypeParameters, List(), instantiate(scheme)), Some(freshParameters.toMap))
                                     unify(fieldType, resultType)
                             }
@@ -157,7 +154,6 @@ class TypeInference {
                             })
                             constructor._2.find(_._1 == label) match {
                                 case None => throw new RuntimeException("No such field: ." + label + ", of " + recordType)
-                                // TODO: Is the empty list of field constraints correct?
                                 case Some((_, scheme)) => instantiate(Scheme(statement.parameters, List(), instantiate(scheme)), Some((statement.parameters zip parameters).toMap))
                             }
                     }
@@ -492,7 +488,6 @@ class TypeInference {
                 }
                 constructor._2.find(_._1 == constraint.label) match {
                     case None => throw new RuntimeException("No such field: ." + constraint.label + ", of " + name)
-                    // TODO: Is the empty list of field constraints correct?
                     case Some((_, scheme)) => instantiate(Scheme(statement.parameters, List(), instantiate(scheme)), Some((statement.parameters zip parameters).toMap))
                 }
         }
