@@ -23,45 +23,49 @@ object Tokenizer {
        ([/][/][^\n]*|[/][*](?:[^*]|[*](?![/]))*[*][/])
     """.lines.map(_.trim).filter(_.nonEmpty).mkString("|") + ")[ ]*").r
 
-    sealed abstract class Token
-    case object OutsideFile extends Token
-    case object Comment extends Token
-    case object LineBreak extends Token
+    case class Position(line : Int, column : Int) {
+        override def toString = "line " + line + ", column " + column
+    }
+
+    sealed abstract class Token(var position : Position = null)
+    case class OutsideFile() extends Token
+    case class Comment() extends Token
+    case class LineBreak() extends Token
     case class Lower(text : String) extends Token
     case class Upper(text : String) extends Token
     case class Sharp(text : String) extends Token
-    case object LeftRound extends Token
-    case object RightRound extends Token
-    case object LeftSquare extends Token
-    case object RightSquare extends Token
-    case object LeftCurly extends Token
-    case object RightCurly extends Token
-    case object Pipe extends Token
-    case object Minus extends Token
-    case object Plus extends Token
-    case object Slash extends Token
-    case object Star extends Token
-    case object Bang extends Token
-    case object AndAnd extends Token
-    case object OrOr extends Token
-    case object LessThan extends Token
-    case object LessThanOrEqual extends Token
-    case object GreaterThan extends Token
-    case object GreaterThanOrEqual extends Token
-    case object NotEqualTo extends Token
-    case object EqualTo extends Token
-    case object Comma extends Token
-    case object SemiColon extends Token
-    case object Dot extends Token
-    case object Colon extends Token
-    case object Ampersand extends Token
-    case object ArrowLeft extends Token
-    case object ArrowRight extends Token
-    case object Underscore extends Token
-    case object Equals extends Token
-    case object MinusEquals extends Token
-    case object PlusEquals extends Token
-    case object StarEquals extends Token
+    case class LeftRound() extends Token
+    case class RightRound() extends Token
+    case class LeftSquare() extends Token
+    case class RightSquare() extends Token
+    case class LeftCurly() extends Token
+    case class RightCurly() extends Token
+    case class Pipe() extends Token
+    case class Minus() extends Token
+    case class Plus() extends Token
+    case class Slash() extends Token
+    case class Star() extends Token
+    case class Bang() extends Token
+    case class AndAnd() extends Token
+    case class OrOr() extends Token
+    case class LessThan() extends Token
+    case class LessThanOrEqual() extends Token
+    case class GreaterThan() extends Token
+    case class GreaterThanOrEqual() extends Token
+    case class NotEqualTo() extends Token
+    case class EqualTo() extends Token
+    case class Comma() extends Token
+    case class SemiColon() extends Token
+    case class Dot() extends Token
+    case class Colon() extends Token
+    case class Ampersand() extends Token
+    case class ArrowLeft() extends Token
+    case class ArrowRight() extends Token
+    case class Underscore() extends Token
+    case class Equals() extends Token
+    case class MinusEquals() extends Token
+    case class PlusEquals() extends Token
+    case class StarEquals() extends Token
     case class StringValue(text : String) extends Token
     case class IntegerValue(value : Long) extends Token
 
@@ -71,88 +75,96 @@ object Tokenizer {
         else if(upper != null) Upper(upper)
         else if(sharp != null) Sharp(sharp)
         else if(bracket != null) bracket match {
-            case "(" => LeftRound
-            case ")" => RightRound
-            case "[" => LeftSquare
-            case "]" => RightSquare
-            case "{" => LeftCurly
-            case "}" => RightCurly
-            case "|" => Pipe
+            case "(" => LeftRound()
+            case ")" => RightRound()
+            case "[" => LeftSquare()
+            case "]" => RightSquare()
+            case "{" => LeftCurly()
+            case "}" => RightCurly()
+            case "|" => Pipe()
             case t => throw new RuntimeException("Unknown token: " + t)
         }
         else if(assign != null) assign match {
-            case "-=" => MinusEquals
-            case "+=" => PlusEquals
-            case "*=" => StarEquals
+            case "-=" => MinusEquals()
+            case "+=" => PlusEquals()
+            case "*=" => StarEquals()
             case t => throw new RuntimeException("Unknown token: " + t)
         }
         else if(operator != null) operator match {
-            case "-" => Minus
-            case "+" => Plus
-            case "/" => Slash
-            case "*" => Star
-            case "!" => Bang
+            case "-" => Minus()
+            case "+" => Plus()
+            case "/" => Slash()
+            case "*" => Star()
+            case "!" => Bang()
             case t => throw new RuntimeException("Unknown token: " + t)
         }
         else if(andOr != null) andOr match {
-            case "&&" => AndAnd
-            case "||" => OrOr
+            case "&&" => AndAnd()
+            case "||" => OrOr()
             case t => throw new RuntimeException("Unknown token: " + t)
         }
         else if(relation != null) relation match {
-            case "<" => LessThan
-            case "<=" => LessThanOrEqual
-            case ">" => GreaterThan
-            case ">=" => GreaterThanOrEqual
-            case "!=" => NotEqualTo
-            case "==" => EqualTo
+            case "<" => LessThan()
+            case "<=" => LessThanOrEqual()
+            case ">" => GreaterThan()
+            case ">=" => GreaterThanOrEqual()
+            case "!=" => NotEqualTo()
+            case "==" => EqualTo()
             case t => throw new RuntimeException("Unknown token: " + t)
         }
         else if(punctuation != null) punctuation match {
-            case "," => Comma
-            case ";" => SemiColon
-            case "." => Dot
-            case ":" => Colon
-            case "&" => Ampersand
-            case "<-" => ArrowLeft
-            case "->" => ArrowRight
-            case "=" => Equals
-            case "_" => Underscore
+            case "," => Comma()
+            case ";" => SemiColon()
+            case "." => Dot()
+            case ":" => Colon()
+            case "&" => Ampersand()
+            case "<-" => ArrowLeft()
+            case "->" => ArrowRight()
+            case "=" => Equals()
+            case "_" => Underscore()
             case t => throw new RuntimeException("Unknown token: " + t)
         }
         else if(single != null) StringValue(single.replace("''", "'"))
         else if(integer != null) IntegerValue(integer.toLong)
-        else if(line != null) LineBreak
-        else if(comment != null) Comment
+        else if(line != null) LineBreak()
+        else if(comment != null) Comment()
         else throw new RuntimeException("Unknown token: " + matcher.group(0))
     }
 
     def tokenize(text : String) : Array[Token] = {
         val brackets = ArrayBuffer[Token]()
         var lineBreak = false
-        val tokens = ArrayBuffer[Token](OutsideFile, OutsideFile, OutsideFile)
+        val tokens = ArrayBuffer[Token](OutsideFile(), OutsideFile(), OutsideFile())
         var currentText = text
         var matcher = pattern.findPrefixMatchOf(currentText)
-        var lastToken : Token = OutsideFile
+        var lastToken : Token = OutsideFile()
         var lastEnd = 0
+        var line = 1
+        var column = 1
         while(matcher.isDefined) {
+            if(matcher.get.group(0) == "\n") {
+                line += 1
+                column = 0
+            }
             val token = matchToToken(matcher.get)
-            if(token != Comment) {
-                if(token == LeftRound || token == LeftSquare || token == LeftCurly || (token == Pipe && brackets.lastOption.exists(_ != Pipe))) {
+            token.position = Position(line, column)
+            if(token != Comment()) {
+                if(token == LeftRound() || token == LeftSquare() || token == LeftCurly() || (token == Pipe() && brackets.lastOption.exists(_ != Pipe()))) {
                     brackets += token
-                } else if(token == RightRound || token == RightSquare || token == RightCurly || token == Pipe) {
+                } else if(token == RightRound() || token == RightSquare() || token == RightCurly() || token == Pipe()) {
                     if(brackets.nonEmpty) brackets.remove(brackets.length - 1)
                 }
-                if(token != LineBreak) {
-                    if(lineBreak && lastToken != OutsideFile && lastToken != Pipe && lastToken != LeftCurly && token != Pipe && token != RightCurly) tokens += LineBreak
+                if(token != LineBreak()) {
+                    if(lineBreak && lastToken != OutsideFile() && lastToken != Pipe() && lastToken != LeftCurly() && token != Pipe() && token != RightCurly()) tokens += LineBreak()
                     lineBreak = false
                     lastToken = token
                     tokens += token
-                } else if(brackets.isEmpty || brackets.last == LeftCurly) {
+                } else if(brackets.isEmpty || brackets.last == LeftCurly()) {
                     lineBreak = true
                 }
             }
             lastEnd = matcher.get.end
+            column += lastEnd
             // Doesn't work in JS for some reason: matcher.region(lastEnd, text.length)
             currentText = currentText.substring(lastEnd)
             matcher = pattern.findPrefixMatchOf(currentText)
@@ -160,9 +172,9 @@ object Tokenizer {
         if(currentText.nonEmpty) {
             throw new RuntimeException("Unexpected character: " + currentText.head)
         }
-        tokens += OutsideFile
-        tokens += OutsideFile
-        tokens += OutsideFile
+        tokens += OutsideFile()
+        tokens += OutsideFile()
+        tokens += OutsideFile()
         tokens.toArray
     }
 

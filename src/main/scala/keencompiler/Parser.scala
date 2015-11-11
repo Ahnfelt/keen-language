@@ -83,6 +83,12 @@ object Parser {
             offset += 1
             token
         }
+        def previousLookBehind() : Token = {
+            tokens(offset - 2)
+        }
+        def lookBehind() : Token = {
+            tokens(offset - 1)
+        }
         def lookAhead() : Token = {
             tokens(offset)
         }
@@ -95,7 +101,7 @@ object Parser {
     }
 
     sealed trait Result[+A]
-    case class Failure(message : String) extends RuntimeException(message) with Result[Nothing]
+    case class Failure(message : String, token : Option[Token]) extends RuntimeException(message + token.map(x => " at " + x.position + ", got: " + x).getOrElse("")) with Result[Nothing]
     case class Success[+A](value : A) extends Result[A]
 
     def require[A](either : Result[A]) = either match {
@@ -121,7 +127,7 @@ object Parser {
     def parsePatterns(cursor : TokenCursor) : Result[List[Pattern]] = {
         val initialPattern = require(parsePattern(cursor))
         val patterns = ListBuffer(initialPattern)
-        while(cursor.lookAhead() == Comma) {
+        while(cursor.lookAhead() == Comma()) {
             cursor.next()
             patterns += require(parsePattern(cursor))
         }
@@ -129,32 +135,32 @@ object Parser {
     }
 
     def parseRecordPattern(cursor : TokenCursor, skipLeftParenthesis : Boolean = false) : Result[RecordPattern] = {
-        if(!skipLeftParenthesis && cursor.next() != LeftRound) throw new RuntimeException("Record must start with left parenthesis: '('")
-        if(cursor.lookAhead() == RightRound) {
+        if(!skipLeftParenthesis && cursor.next() != LeftRound()) throw new Failure("Record must start with left parenthesis: '('", Some(cursor.lookBehind()))
+        if(cursor.lookAhead() == RightRound()) {
             cursor.next()
             return Success(RecordPattern(List()))
         }
         (cursor.next(), cursor.next()) match {
-            case (Lower(initialLabel), Equals) =>
+            case (Lower(initialLabel), Equals()) =>
                 val initial = require(parsePattern(cursor))
                 val list = ListBuffer[(String, Pattern)](initialLabel -> initial)
-                while (cursor.lookAhead() == Comma) {
+                while (cursor.lookAhead() == Comma()) {
                     cursor.next()
                     val label = cursor.next() match {
                         case Lower(x) => x
-                        case _ => return Failure("Expected label")
+                        case _ => return Failure("Expected label", Some(cursor.lookBehind()))
                     }
                     cursor.next() match {
-                        case Equals =>
-                        case _ => return Failure("Expected equals sign: '='")
+                        case Equals() =>
+                        case _ => return Failure("Expected equals sign: '='", Some(cursor.lookBehind()))
                     }
                     val pattern = require(parsePattern(cursor))
                     list += (label -> pattern)
                 }
-                if (cursor.next() != RightRound) return Failure("Expected right parenthesis: ')'")
+                if(cursor.next() != RightRound()) return Failure("Expected right parenthesis: ')'", Some(cursor.lookBehind()))
                 Success(RecordPattern(list.toList))
             case _ =>
-                throw new RuntimeException("Expected record pattern.")
+                throw new Failure("Expected record pattern", Some(cursor.lookBehind()))
         }
     }
 
@@ -163,130 +169,130 @@ object Parser {
             case (Upper(name), Lower(alias)) =>
                 cursor.next()
                 Success(ExtractPattern(name, Some(alias)))
-            case (Upper(name), Underscore) =>
+            case (Upper(name), Underscore()) =>
                 cursor.next()
                 Success(ExtractPattern(name, None))
-            case (Upper(name), LeftRound) =>
-                val record = if(cursor.lookAhead() == LeftRound) require(parseRecordPattern(cursor)) else RecordPattern(List())
+            case (Upper(name), LeftRound()) =>
+                val record = if(cursor.lookAhead() == LeftRound()) require(parseRecordPattern(cursor)) else RecordPattern(List())
                 Success(ConstructorPattern(name, record.fields))
             case (Upper(name), _) =>
                 Success(ConstructorPattern(name, List()))
-            case (LeftSquare, _) =>
-                if(cursor.lookAhead() == RightSquare) {
+            case (LeftSquare(), _) =>
+                if(cursor.lookAhead() == RightSquare()) {
                     cursor.next()
                     Success(ArrayPattern(List()))
                 } else {
                     cursor.next()
                     val patterns = require(parsePatterns(cursor))
-                    if(cursor.next() != RightSquare) return Failure("Expected right bracket: ']'")
+                    if(cursor.next() != RightSquare()) return Failure("Expected right bracket: ']'", Some(cursor.lookBehind()))
                     Success(ArrayPattern(patterns))
                 }
-            case (LeftRound, _) =>
-                if(cursor.lookAhead() == RightRound) { cursor.next(); return Success(RecordPattern(List())) }
+            case (LeftRound(), _) =>
+                if(cursor.lookAhead() == RightRound()) { cursor.next(); return Success(RecordPattern(List())) }
                 (cursor.lookAhead(), cursor.nextLookAhead()) match {
-                    case (Lower(initialLabel), Equals) => parseRecordPattern(cursor, skipLeftParenthesis = true)
+                    case (Lower(initialLabel), Equals()) => parseRecordPattern(cursor, skipLeftParenthesis = true)
                     case _ =>
                         val pattern = parsePattern(cursor)
-                        if(cursor.next() != RightRound) return Failure("Expected right parenthesis: ')'")
+                        if(cursor.next() != RightRound()) return Failure("Expected right parenthesis: ')'", Some(cursor.lookBehind()))
                         pattern
                 }
-            case (Underscore, _) => Success(WildcardPattern)
+            case (Underscore(), _) => Success(WildcardPattern)
             case (Lower(name), _) => Success(VariablePattern(name))
             case (StringValue(value), _) => Success(StringPattern(value))
             case (IntegerValue(value), _) => Success(IntegerPattern(value))
-            case (_, _) => Failure("Expected pattern")
+            case (_, _) => Failure("Expected pattern", Some(cursor.lookBehind()))
         }
     }
 
     def parseLambda(cursor : TokenCursor) : Result[Term] = {
-        if(cursor.next() != LeftCurly) return Failure("Expected {...}")
-        if(cursor.lookAhead() != Pipe) {
+        if(cursor.next() != LeftCurly()) return Failure("Expected {...}", Some(cursor.lookBehind()))
+        if(cursor.lookAhead() != Pipe()) {
             val statements = require(parseStatements(cursor))
-            if(cursor.next() != RightCurly) return Failure("Expected (...)")
+            if(cursor.next() != RightCurly()) return Failure("Expected (...)", Some(cursor.lookBehind()))
             return Success(Lambda(List(List() -> statements)))
         }
         val list = ListBuffer[(List[Pattern], List[Statement])]()
-        while(cursor.lookAhead() == Pipe) {
+        while(cursor.lookAhead() == Pipe()) {
             cursor.next()
             val patterns = require(parsePatterns(cursor))
-            if(cursor.next() != Pipe) return Failure("Expected pipe: '|'")
+            if(cursor.next() != Pipe()) return Failure("Expected pipe: '|'", Some(cursor.lookBehind()))
             val statements = require(parseStatements(cursor))
             list += (patterns.toList -> statements)
         }
-        if(cursor.next() != RightCurly) return Failure("Expected (...)")
+        if(cursor.next() != RightCurly()) return Failure("Expected (...)", Some(cursor.lookBehind()))
         Success(Lambda(list.toList))
     }
 
     def parseArray(cursor : TokenCursor) : Result[Term] = {
-        if(cursor.next() != LeftSquare) return Failure("Expected [...]")
-        if(cursor.lookAhead() == RightSquare) {
+        if(cursor.next() != LeftSquare()) return Failure("Expected [...]", Some(cursor.lookBehind()))
+        if(cursor.lookAhead() == RightSquare()) {
             cursor.next()
             return Success(ArrayLiteral(List[Term]()))
         }
         val initial = require(parseTerm(cursor))
         val list = ListBuffer(initial)
-        while(cursor.lookAhead() == Comma) {
+        while(cursor.lookAhead() == Comma()) {
             cursor.next()
             val term = require(parseTerm(cursor))
             list += term
         }
-        if(cursor.next() != RightSquare) return Failure("Expected [...]")
+        if(cursor.next() != RightSquare()) return Failure("Expected [...]", Some(cursor.lookBehind()))
         Success(ArrayLiteral(list.toList))
     }
 
     def parseRecord(cursor : TokenCursor, skipLeftParenthesis : Boolean = false) : Result[Record] = {
-        if(!skipLeftParenthesis && cursor.next() != LeftRound) throw new RuntimeException("Record must start with left parenthesis: '('")
-        if(cursor.lookAhead() == RightRound) {
+        if(!skipLeftParenthesis && cursor.next() != LeftRound()) throw new Failure("Record must start with left parenthesis: '('", Some(cursor.lookBehind()))
+        if(cursor.lookAhead() == RightRound()) {
             cursor.next()
             return Success(Record(List()))
         }
         (cursor.next(), cursor.next()) match {
-            case (Lower(initialLabel), Equals) =>
+            case (Lower(initialLabel), Equals()) =>
                 val initial = require(parseTerm(cursor))
                 val list = ListBuffer[(String, Term)](initialLabel -> initial)
-                while(cursor.lookAhead() == Comma) {
+                while(cursor.lookAhead() == Comma()) {
                     cursor.next()
                     val label = cursor.next() match {
                         case Lower(x) => x
-                        case _ => return Failure("Expected label")
+                        case _ => return Failure("Expected label", Some(cursor.lookBehind()))
                     }
                     cursor.next() match {
-                        case Equals =>
-                        case _ => return Failure("Expected equals sign: '='")
+                        case Equals() =>
+                        case _ => return Failure("Expected equals sign: '='", Some(cursor.lookBehind()))
                     }
                     val term = require(parseTerm(cursor))
                     list += (label -> term)
                 }
-                if(cursor.next() != RightRound) return Failure("Expected right parenthesis: ')'")
+                if(cursor.next() != RightRound()) return Failure("Expected right parenthesis: ')'", Some(cursor.lookBehind()))
                 Success(Record(list.toList))
             case _ =>
-                throw new RuntimeException("Record expected")
+                throw new Failure("Record expected", Some(cursor.previousLookBehind()))
         }
     }
 
     def parseParenthesis(cursor : TokenCursor) : Result[List[Term]] = {
-        if(cursor.next() != LeftRound) return Failure("Expected (...)")
-        if(cursor.lookAhead() == RightRound) { cursor.next(); return Success(List(Record(List()))) }
+        if(cursor.next() != LeftRound()) return Failure("Expected (...)", Some(cursor.lookBehind()))
+        if(cursor.lookAhead() == RightRound()) { cursor.next(); return Success(List(Record(List()))) }
         (cursor.lookAhead(), cursor.nextLookAhead()) match {
-            case (Lower(initialLabel), Equals) => Success(List(require(parseRecord(cursor, skipLeftParenthesis = true))))
+            case (Lower(initialLabel), Equals()) => Success(List(require(parseRecord(cursor, skipLeftParenthesis = true))))
             case _ =>
                 val initial = require(parseTerm(cursor))
                 val list = ListBuffer[Term](initial)
-                while(cursor.lookAhead() == Comma) {
+                while(cursor.lookAhead() == Comma()) {
                     cursor.next()
                     val term = require(parseTerm(cursor))
                     list += term
                 }
-                if(cursor.next() != RightRound) return Failure("Expected right parenthesis: ')'")
+                if(cursor.next() != RightRound()) return Failure("Expected right parenthesis: ')'", Some(cursor.lookBehind()))
                 Success(list.toList)
         }
     }
 
     def parseBrackets(cursor : TokenCursor) : Result[List[Term]] = {
-        if(cursor.lookAhead() == LeftRound) parseParenthesis(cursor)
-        else if(cursor.lookAhead() == LeftSquare) Success(List(require(parseArray(cursor))))
-        else if(cursor.lookAhead() == LeftCurly) Success(List(require(parseLambda(cursor))))
-        else Failure("Expected (...), [...] or {...}")
+        if(cursor.lookAhead() == LeftRound()) parseParenthesis(cursor)
+        else if(cursor.lookAhead() == LeftSquare()) Success(List(require(parseArray(cursor))))
+        else if(cursor.lookAhead() == LeftCurly()) Success(List(require(parseLambda(cursor))))
+        else Failure("Expected (...), [...] or {...}", Some(cursor.lookAhead()))
     }
 
     def parseAtomic(cursor : TokenCursor) : Result[Term] = {
@@ -294,13 +300,13 @@ object Parser {
             case Lower(name) => cursor.next(); Success(Variable(name))
             case Upper(name) =>
                 cursor.next()
-                val parameters = if(cursor.lookAhead() == LeftRound) require(parseRecord(cursor)) else Record(List())
+                val parameters = if(cursor.lookAhead() == LeftRound()) require(parseRecord(cursor)) else Record(List())
                 Success(Constructor(name, parameters.fields))
             case IntegerValue(value) => cursor.next(); Success(IntegerLiteral(value))
             case StringValue(value) => cursor.next(); Success(StringLiteral(value))
             case _ => require(parseBrackets(cursor)) match {
                 case List(value) => Success(value)
-                case _ => Failure("Unexpected parameter list")
+                case _ => Failure("Unexpected parameter list", Some(cursor.lookAhead()))
             }
         }
     }
@@ -308,11 +314,11 @@ object Parser {
     def parseDots(cursor : TokenCursor) : Result[Term] = {
         val initial = require(parseAtomic(cursor))
         val list = ListBuffer[String]()
-        while(cursor.lookAhead() == Dot) {
+        while(cursor.lookAhead() == Dot()) {
             cursor.next()
             cursor.next() match {
                 case Lower(name) => list += name
-                case _ => return Failure("Expected field label")
+                case _ => return Failure("Expected field label", Some(cursor.lookBehind()))
             }
         }
         Success(list.foldLeft(initial){ case (a, b) => Field(a, b) })
@@ -321,7 +327,7 @@ object Parser {
     def parseCall(cursor : TokenCursor) : Result[Term] = {
         val initial = require(parseDots(cursor))
         val list = ListBuffer[List[Term]]()
-        while(cursor.lookAhead() == LeftRound || cursor.lookAhead() == LeftSquare || cursor.lookAhead() == LeftCurly) {
+        while(cursor.lookAhead() == LeftRound() || cursor.lookAhead() == LeftSquare() || cursor.lookAhead() == LeftCurly()) {
             val term = require(parseBrackets(cursor))
             list += term
         }
@@ -329,63 +335,63 @@ object Parser {
     }
 
     def parseNegation(cursor : TokenCursor) : Result[Term] = {
-        if(cursor.lookAhead() != Minus && cursor.lookAhead() != Bang) return parseCall(cursor)
+        if(cursor.lookAhead() != Minus() && cursor.lookAhead() != Bang()) return parseCall(cursor)
         val operator = cursor.next()
         val term = require(parseCall(cursor))
         Success(UnaryOperator(operator, term))
     }
 
-    def parseProduct(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseNegation, Star, Slash)
-    def parseSum(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseProduct, Plus, Minus)
-    def parseRelation(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseSum, EqualTo, NotEqualTo, LessThan, LessThanOrEqual, GreaterThan, GreaterThanOrEqual)
-    def parseAndOr(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseRelation, AndAnd, OrOr)
+    def parseProduct(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseNegation, Star(), Slash())
+    def parseSum(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseProduct, Plus(), Minus())
+    def parseRelation(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseSum, EqualTo(), NotEqualTo(), LessThan(), LessThanOrEqual(), GreaterThan(), GreaterThanOrEqual())
+    def parseAndOr(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseRelation, AndAnd(), OrOr())
 
     def parseTerm(cursor : TokenCursor) : Result[Term] = parseAndOr(cursor)
 
     def parseRecordType(cursor : TokenCursor, skipLeftParenthesis : Boolean = false) : Result[RecordType] = {
-        if(!skipLeftParenthesis && cursor.next() != LeftRound) throw new RuntimeException("Record must start with left parenthesis: '('")
-        if(cursor.lookAhead() == RightRound) {
+        if(!skipLeftParenthesis && cursor.next() != LeftRound()) throw new Failure("Record must start with left parenthesis: '('", Some(cursor.lookBehind()))
+        if(cursor.lookAhead() == RightRound()) {
             cursor.next()
             return Success(RecordType(List()))
         }
         (cursor.next(), cursor.next()) match {
-            case (Lower(initialLabel), Colon) =>
+            case (Lower(initialLabel), Colon()) =>
                 val initial = require(parseType(cursor))
                 val list = ListBuffer[(String, Type)](initialLabel -> initial)
-                while(cursor.lookAhead() == Comma) {
+                while(cursor.lookAhead() == Comma()) {
                     cursor.next()
                     val label = cursor.next() match {
                         case Lower(x) => x
-                        case _ => return Failure("Expected label")
+                        case _ => return Failure("Expected label", Some(cursor.lookBehind()))
                     }
                     cursor.next() match {
-                        case Colon =>
-                        case _ => return Failure("Expected colon: ':'")
+                        case Colon() =>
+                        case _ => return Failure("Expected colon: ':'", Some(cursor.lookBehind()))
                     }
                     val term = require(parseType(cursor))
                     list += (label -> term)
                 }
-                if(cursor.next() != RightRound) return Failure("Expected right parenthesis: ')'")
+                if(cursor.next() != RightRound()) return Failure("Expected right parenthesis: ')'", Some(cursor.lookBehind()))
                 Success(RecordType(list.toList))
             case _ =>
-                throw new RuntimeException("Expected record pattern.")
+                throw new Failure("Expected record pattern", Some(cursor.previousLookBehind()))
         }
     }
 
     def parseParenthesisType(cursor : TokenCursor) : Result[List[Type]] = {
-        if(cursor.next() != LeftRound) return Failure("Expected (...)")
-        if(cursor.lookAhead() == RightRound) { cursor.next(); return Success(List(RecordType(List()))) }
+        if(cursor.next() != LeftRound()) return Failure("Expected (...)", Some(cursor.lookBehind()))
+        if(cursor.lookAhead() == RightRound()) { cursor.next(); return Success(List(RecordType(List()))) }
         (cursor.lookAhead(), cursor.nextLookAhead()) match {
-            case (Lower(initialLabel), Colon) => Success(List(require(parseRecordType(cursor, skipLeftParenthesis = true))))
+            case (Lower(initialLabel), Colon()) => Success(List(require(parseRecordType(cursor, skipLeftParenthesis = true))))
             case _ =>
                 val initial = require(parseType(cursor))
                 val list = ListBuffer[Type](initial)
-                while(cursor.lookAhead() == Comma) {
+                while(cursor.lookAhead() == Comma()) {
                     cursor.next()
                     val term = require(parseType(cursor))
                     list += term
                 }
-                if(cursor.next() != RightRound) return Failure("Expected right parenthesis: ')'")
+                if(cursor.next() != RightRound()) return Failure("Expected right parenthesis: ')'", Some(cursor.lookBehind()))
                 Success(list.toList)
         }
     }
@@ -393,17 +399,17 @@ object Parser {
     def parseConstantType(cursor : TokenCursor) : Result[ConstantType] = {
         val name = cursor.next() match {
             case Upper(x) => x
-            case _ => return Failure("Expected type constructor")
+            case _ => return Failure("Expected type constructor", Some(cursor.lookBehind()))
         }
-        if(cursor.lookAhead() == LessThan) {
+        if(cursor.lookAhead() == LessThan()) {
             cursor.next()
             val parameter = require(parseType(cursor))
             val parameters = ListBuffer[Type](parameter)
-            while(cursor.lookAhead() == Comma) {
+            while(cursor.lookAhead() == Comma()) {
                 cursor.next()
                 parameters += require(parseType(cursor))
             }
-            if(cursor.next() != GreaterThan) throw new RuntimeException("Expected '>'.")
+            if(cursor.next() != GreaterThan()) throw new Failure("Expected '>'", Some(cursor.lookBehind()))
             Success(ConstantType(name, parameters.toList))
         } else {
             Success(ConstantType(name, List()))
@@ -413,9 +419,9 @@ object Parser {
     def parseConstructorDefinition(cursor : TokenCursor) : Result[ConstructorDefinition] = {
         val name = cursor.next() match {
             case Upper(x) => x
-            case _ => return Failure("Expected type constructor")
+            case _ => return Failure("Expected type constructor", Some(cursor.lookBehind()))
         }
-        if(cursor.lookAhead() != LeftRound) {
+        if(cursor.lookAhead() != LeftRound()) {
             Success(ConstructorDefinition(name, List()))
         } else {
             val record = require(parseRecordType(cursor))
@@ -425,7 +431,7 @@ object Parser {
 
     def parseAtomicType(cursor : TokenCursor) : Result[List[Type]] = {
         cursor.lookAhead() match {
-            case LeftRound => parseParenthesisType(cursor)
+            case LeftRound() => parseParenthesisType(cursor)
             case Upper(_) => Success(List(require(parseConstantType(cursor))))
             case Lower(name) => cursor.next(); Success(List(RigidType(name)))
         }
@@ -433,8 +439,8 @@ object Parser {
 
     def parseFunctionType(cursor : TokenCursor) : Result[Type] = {
         val parameters = require(parseAtomicType(cursor))
-        if(cursor.lookAhead() != ArrowRight) {
-            if(parameters.length != 1) throw new RuntimeException("Unexpected parameter list.")
+        if(cursor.lookAhead() != ArrowRight()) {
+            if(parameters.length != 1) throw new Failure("Unexpected parameter list", Some(cursor.lookAhead()))
             return Success(parameters.head)
         }
         cursor.next()
@@ -455,18 +461,18 @@ object Parser {
         val generalType = require(parseType(cursor))
         var typeParameters = free(generalType)
         val fieldConstraints = ListBuffer[(String, FieldConstraint)]()
-        while(cursor.lookAhead() == Ampersand) {
+        while(cursor.lookAhead() == Ampersand()) {
             cursor.next()
             val record = cursor.next() match {
                 case Lower(text) => text
-                case _ => throw new RuntimeException("Expected a lowercase type parameter")
+                case _ => throw new Failure("Expected a lowercase type parameter", Some(cursor.lookBehind()))
             }
-            if(cursor.next() != Dot) throw new RuntimeException("Expected a dot")
+            if(cursor.next() != Dot()) throw new Failure("Expected a dot", Some(cursor.lookBehind()))
             val label = cursor.next() match {
                 case Lower(text) => text
-                case _ => throw new RuntimeException("Expected a lowercase field")
+                case _ => throw new Failure("Expected a lowercase field", Some(cursor.lookBehind()))
             }
-            if(cursor.next() != Colon) throw new RuntimeException("Expected a colon")
+            if(cursor.next() != Colon()) throw new Failure("Expected a colon", Some(cursor.lookBehind()))
             val fieldType = require(parseType(cursor))
             typeParameters ++= (Set(record) ++ free(fieldType))
             fieldConstraints += (record -> FieldConstraint(label, fieldType))
@@ -478,69 +484,69 @@ object Parser {
         cursor.next() match {
             case Upper(name) =>
                 val parameters = cursor.next() match {
-                    case Colon => List[String]()
-                    case LessThan =>
+                    case Colon() => List[String]()
+                    case LessThan() =>
                         def nextParameter() = cursor.next() match {
                             case Lower(x) => x
-                            case _ => throw new RuntimeException("Expected a lowercase type parameter")
+                            case _ => throw new Failure("Expected a lowercase type parameter", Some(cursor.lookBehind()))
                         }
                         val initial = nextParameter()
                         val list = ListBuffer(initial)
-                        while(cursor.lookAhead() == Comma) {
+                        while(cursor.lookAhead() == Comma()) {
                             cursor.next()
                             list += nextParameter()
                         }
-                        if(cursor.next() != GreaterThan) throw new RuntimeException("Expected '>'")
-                        if(cursor.next() != Colon) throw new RuntimeException("Expected ':'")
+                        if(cursor.next() != GreaterThan()) throw new Failure("Expected '>'", Some(cursor.lookBehind()))
+                        if(cursor.next() != Colon()) throw new Failure("Expected ':'", Some(cursor.lookBehind()))
                         list.toList
                 }
-                if(cursor.next() != Equals) throw new RuntimeException("Expected '='")
-                if(cursor.next() != LeftSquare) throw new RuntimeException("Expected '['")
+                if(cursor.next() != Equals()) throw new Failure("Expected '='", Some(cursor.lookBehind()))
+                if(cursor.next() != LeftSquare()) throw new Failure("Expected '['", Some(cursor.lookBehind()))
                 val constructors = ListBuffer[ConstructorDefinition]()
-                if(cursor.lookAhead() != RightSquare) {
+                if(cursor.lookAhead() != RightSquare()) {
                     constructors += require(parseConstructorDefinition(cursor))
-                    while(cursor.lookAhead() == Comma) {
+                    while(cursor.lookAhead() == Comma()) {
                         cursor.next()
                         constructors += require(parseConstructorDefinition(cursor))
                     }
                 }
-                if(cursor.next() != RightSquare) throw new RuntimeException("Expected ']'")
+                if(cursor.next() != RightSquare()) throw new Failure("Expected ']'", Some(cursor.lookBehind()))
                 Success(SumTypeStatement(name, parameters, constructors.toList.map(t => t.name -> t.fields.map(f => f._1 -> Scheme(List(), List(), f._2)))))
             case _ =>
-                Failure("Expected identifier followed by :")
+                Failure("Expected identifier followed by :", Some(cursor.lookBehind()))
         }
     }
 
     def parseVariableStatement(cursor : TokenCursor) : Result[VariableStatement] = {
         (cursor.next(), cursor.next()) match {
-            case (Lower(name), Colon) =>
-                val scheme = if(cursor.lookAhead() != Equals) Some(require(parseScheme(cursor))) else None
-                if(cursor.next() != Equals) throw new RuntimeException("Expected '='")
+            case (Lower(name), Colon()) =>
+                val scheme = if(cursor.lookAhead() != Equals()) Some(require(parseScheme(cursor))) else None
+                if(cursor.next() != Equals()) throw new Failure("Expected '='", Some(cursor.lookBehind()))
                 val value = require(parseTerm(cursor))
                 Success(VariableStatement(name, scheme, value))
             case _ =>
-                Failure("Expected identifier followed by :")
+                Failure("Expected identifier followed by :", Some(cursor.previousLookBehind()))
         }
     }
 
     def parseAssignStatement(cursor : TokenCursor) : Result[AssignStatement] = {
         val name = cursor.next() match {
             case Lower(x) => x
-            case _ => throw new RuntimeException("Expected an identifier followed by '='")
+            case _ => throw new Failure("Expected an identifier followed by '='", Some(cursor.lookBehind()))
         }
         val o = cursor.next()
-        if(!(o == Equals || o == MinusEquals || o == PlusEquals || o == StarEquals)) throw new RuntimeException("Expected an assignment operator, eg. '='")
+        if(!(o == Equals() || o == MinusEquals() || o == PlusEquals() || o == StarEquals())) throw new Failure("Expected an assignment operator, eg. '='", Some(cursor.lookBehind()))
         val value = require(parseTerm(cursor))
         Success(AssignStatement(Variable(name), o, value))
     }
 
     def parseStatement(cursor : TokenCursor) : Result[Statement] = {
         (cursor.lookAhead(), cursor.nextLookAhead(), cursor.nextNextLookAhead()) match {
-            case (Upper(_), token, _) if token == LessThan || token == Colon => parseSumTypeStatement(cursor)
-            case (Lower(_), Colon, _) => parseVariableStatement(cursor)
-            case (Lower(_), o, _) if o == Equals || o == MinusEquals || o == PlusEquals || o == StarEquals => parseAssignStatement(cursor)
+            case (Upper(_), token, _) if token == LessThan() || token == Colon() => parseSumTypeStatement(cursor)
+            case (Lower(_), Colon(), _) => parseVariableStatement(cursor)
+            case (Lower(_), o, _) if o == Equals() || o == MinusEquals() || o == PlusEquals() || o == StarEquals() => parseAssignStatement(cursor)
             case (Sharp(_), _, _) => // Treat imports etc. as single line comments for now
-                while(cursor.lookAhead() != LineBreak && cursor.lookAhead() != OutsideFile) cursor.next()
+                while(cursor.lookAhead() != LineBreak() && cursor.lookAhead() != OutsideFile()) cursor.next()
                 cursor.next()
                 parseStatement(cursor)
             case _ => Success(TermStatement(require(parseTerm(cursor))))
@@ -548,10 +554,10 @@ object Parser {
     }
 
     def parseStatements(cursor : TokenCursor) : Result[List[Statement]] = {
-        if(Seq(OutsideFile, RightCurly, Pipe).contains(cursor.lookAhead())) return Success(List())
+        if(Seq(OutsideFile(), RightCurly(), Pipe()).contains(cursor.lookAhead())) return Success(List())
         val initial = require(parseStatement(cursor))
         val list = ListBuffer[Statement](initial)
-        while(cursor.lookAhead() == LineBreak || cursor.lookAhead() == SemiColon) {
+        while(cursor.lookAhead() == LineBreak() || cursor.lookAhead() == SemiColon()) {
             cursor.next()
             val statement = require(parseStatement(cursor))
             list += statement
@@ -562,7 +568,7 @@ object Parser {
     def parseProgram(cursor : TokenCursor) : Result[List[Statement]] = {
         parseStatements(cursor) match {
             case failure : Failure => failure
-            case _ if cursor.lookAhead() != OutsideFile => Failure("Expected end of file")
+            case _ if cursor.lookAhead() != OutsideFile() => Failure("Expected end of file", Some(cursor.lookAhead()))
             case success => success
         }
     }

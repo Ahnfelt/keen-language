@@ -171,11 +171,11 @@ class Emitter(emit : String => Unit) {
                 emit(escapeString(value))
             case IntegerLiteral(value) =>
                 emit(value.toString)
-            case UnaryOperator(Bang, operand) =>
+            case UnaryOperator(Bang(), operand) =>
                 emit("(!")
                 emitTerm(operand)
                 emit(")")
-            case UnaryOperator(Minus, operand) =>
+            case UnaryOperator(Minus(), operand) =>
                 emit("(-")
                 emitTerm(operand)
                 emit(")")
@@ -183,18 +183,18 @@ class Emitter(emit : String => Unit) {
                 emit("(")
                 emitTerm(left)
                 emit(" " + (operator match {
-                    case Minus => "-"
-                    case Plus => "+"
-                    case Slash => "/"
-                    case Star => "*"
-                    case AndAnd => "&&"
-                    case OrOr => "||"
-                    case LessThan => "<"
-                    case LessThanOrEqual => "<="
-                    case GreaterThan => ">"
-                    case GreaterThanOrEqual => ">="
-                    case NotEqualTo => "!="
-                    case EqualTo => "=="
+                    case Minus() => "-"
+                    case Plus() => "+"
+                    case Slash() => "/"
+                    case Star() => "*"
+                    case AndAnd() => "&&"
+                    case OrOr() => "||"
+                    case LessThan() => "<"
+                    case LessThanOrEqual() => "<="
+                    case GreaterThan() => ">"
+                    case GreaterThanOrEqual() => ">="
+                    case NotEqualTo() => "!="
+                    case EqualTo() => "=="
                 }) + " ")
                 emitTerm(right)
                 emit(")")
@@ -214,10 +214,10 @@ class Emitter(emit : String => Unit) {
                 emitTerm(term)
                 emit(" ")
                 operator match {
-                    case Equals => emit("=")
-                    case MinusEquals => emit("-=")
-                    case PlusEquals => emit("+=")
-                    case StarEquals => emit("*=")
+                    case Equals() => emit("=")
+                    case MinusEquals() => emit("-=")
+                    case PlusEquals() => emit("+=")
+                    case StarEquals() => emit("*=")
                 }
                 emit(" ")
                 emitTerm(value)

@@ -182,17 +182,17 @@ class TypeInference {
             ConstantType("String", List())
         case IntegerLiteral(value) =>
             ConstantType("Int", List())
-        case UnaryOperator(Tokenizer.Bang, operand) =>
+        case UnaryOperator(Tokenizer.Bang(), operand) =>
             unify(ConstantType("Bool", List()), checkTerm(operand))
             ConstantType("Bool", List())
-        case UnaryOperator(Tokenizer.Minus, operand) =>
+        case UnaryOperator(Tokenizer.Minus(), operand) =>
             unify(ConstantType("Int", List()), checkTerm(operand))
             ConstantType("Int", List())
-        case BinaryOperator(token, left, right) if Seq(Tokenizer.Minus, Tokenizer.Plus, Tokenizer.Star, Tokenizer.Slash).contains(token) =>
+        case BinaryOperator(token, left, right) if Seq(Tokenizer.Minus(), Tokenizer.Plus(), Tokenizer.Star(), Tokenizer.Slash()).contains(token) =>
             unify(ConstantType("Int", List()), checkTerm(left))
             unify(ConstantType("Int", List()), checkTerm(right))
             ConstantType("Int", List())
-        case BinaryOperator(token, left, right) if Seq(Tokenizer.AndAnd, Tokenizer.OrOr).contains(token) =>
+        case BinaryOperator(token, left, right) if Seq(Tokenizer.AndAnd(), Tokenizer.OrOr()).contains(token) =>
             unify(ConstantType("Bool", List()), checkTerm(left))
             unify(ConstantType("Bool", List()), checkTerm(right))
             ConstantType("Bool", List())
