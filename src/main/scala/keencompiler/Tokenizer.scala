@@ -142,10 +142,6 @@ object Tokenizer {
         var line = 1
         var column = 1
         while(matcher.isDefined) {
-            if(matcher.get.group(0) == "\n") {
-                line += 1
-                column = 0
-            }
             val token = matchToToken(matcher.get)
             token.position = Position(line, column)
             if(token != Comment()) {
@@ -164,7 +160,12 @@ object Tokenizer {
                 }
             }
             lastEnd = matcher.get.end
-            column += lastEnd
+            if(matcher.get.group(12) != null) {
+                line += 1
+                column = 1
+            } else {
+                column += lastEnd
+            }
             // Doesn't work in JS for some reason: matcher.region(lastEnd, text.length)
             currentText = currentText.substring(lastEnd)
             matcher = pattern.findPrefixMatchOf(currentText)
