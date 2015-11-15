@@ -10,10 +10,11 @@ object Tokenizer {
     val pattern = ("^[ ]*(?:" + """
        ([a-z][a-zA-Z0-9]*)(?![a-zA-Z0-9])
        ([A-Z][a-zA-Z0-9]*)(?![a-zA-Z0-9])
+       [#]js[ ]([^\r\n]+)
        ([#][a-zA-Z0-9]+)(?![a-zA-Z0-9])
        (\&\&|\|\|)
        ([(){}\[\]|])
-       ([_,;.:|]|[-][>]|[<][-]|[=](?![=])|[&](?![&]))
+       ([_,;:|]|[.][.]?|[-][>]|[<][-]|[=](?![=])|[&](?![&]))
        ([-+*][=])
        ([-+/*!])(?![=/*])
        ([>][=]?|[<][=]?|[!][=]|[=][=])
@@ -57,6 +58,7 @@ object Tokenizer {
     case class Comma() extends Token
     case class SemiColon() extends Token
     case class Dot() extends Token
+    case class DotDot() extends Token
     case class Colon() extends Token
     case class Ampersand() extends Token
     case class ArrowLeft() extends Token
@@ -66,14 +68,16 @@ object Tokenizer {
     case class MinusEquals() extends Token
     case class PlusEquals() extends Token
     case class StarEquals() extends Token
+    case class JsSnippet(js : String) extends Token
     case class StringValue(text : String) extends Token
     case class IntegerValue(value : Long) extends Token
 
     def matchToToken(matcher : Regex.Match) : Token = {
-        val Seq(lower, upper, sharp, andOr, bracket, punctuation, assign, operator, relation, single, integer, line, comment) = (1 to 13).map(matcher.group)
+        val Seq(lower, upper, js, sharp, andOr, bracket, punctuation, assign, operator, relation, single, integer, line, comment) = (1 to 14).map(matcher.group)
         if(lower != null) Lower(lower)
         else if(upper != null) Upper(upper)
         else if(sharp != null) Sharp(sharp)
+        else if(js != null) JsSnippet(js)
         else if(bracket != null) bracket match {
             case "(" => LeftRound()
             case ")" => RightRound()
@@ -116,6 +120,7 @@ object Tokenizer {
             case "," => Comma()
             case ";" => SemiColon()
             case "." => Dot()
+            case ".." => DotDot()
             case ":" => Colon()
             case "&" => Ampersand()
             case "<-" => ArrowLeft()
@@ -160,7 +165,7 @@ object Tokenizer {
                 }
             }
             lastEnd = matcher.get.end
-            if(matcher.get.group(12) != null) {
+            if(matcher.get.group(13) != null) {
                 line += 1
                 column = 1
             } else {

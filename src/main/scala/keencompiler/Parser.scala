@@ -1,6 +1,6 @@
 package keencompiler
 
-import Tokenizer.Token
+import keencompiler.Tokenizer.{Position, Token}
 
 import scala.collection.mutable.ListBuffer
 
@@ -10,7 +10,7 @@ object Parser {
     // Using + etc. generates: t1.+ : t1 -> t1, which is only satisfiable by t1 = Float or t1 = Int.
     // Polymorphic fields, eg. t1.f : Int -> Int, t1.f : String -> String is reduced to t1.f : forall a. a -> a
 
-    sealed abstract class Type
+    sealed abstract class Type(var position : Position = null)
     case class FunctionType(parameters : List[Type], returns : Type) extends Type {
         override def toString = {
             val parametersString = parameters match {
@@ -39,7 +39,7 @@ object Parser {
 
     case class ConstructorDefinition(name : String, fields : List[(String, Type)])
 
-    sealed abstract class Statement
+    sealed abstract class Statement(var position : Position = null)
     case class SumTypeStatement(name : String, parameters : List[String], constructors : List[(String, List[(String, Scheme)])]) extends Statement
     case class VariableStatement(name : String, scheme : Option[Scheme], value : Term) extends Statement
     case class AssignStatement(term : Term, operator : Token, value : Term) extends Statement
@@ -54,8 +54,8 @@ object Parser {
         }
     }
 
-    sealed abstract class Pattern
-    case object WildcardPattern extends Pattern
+    sealed abstract class Pattern(var position : Position = null)
+    case class WildcardPattern() extends Pattern
     case class VariablePattern(name : String) extends Pattern
     case class ExtractPattern(name : String, alias : Option[String]) extends Pattern
     case class ConstructorPattern(name : String, fields : List[(String, Pattern)]) extends Pattern
@@ -64,7 +64,7 @@ object Parser {
     case class StringPattern(value : String) extends Pattern
     case class IntegerPattern(value : Long) extends Pattern
 
-    sealed abstract class Term
+    sealed abstract class Term(var position : Position = null)
     case class Variable(name : String) extends Term
     case class Lambda(cases : List[(List[Pattern], List[Statement])]) extends Term
     case class Call(function : Term, parameters : List[Term]) extends Term
@@ -74,6 +74,7 @@ object Parser {
     case class ArrayLiteral(elements : List[Term]) extends Term
     case class StringLiteral(value : String) extends Term
     case class IntegerLiteral(value : Long) extends Term
+    case class JsCode(js : String) extends Term
     case class UnaryOperator(operator : Token, operand : Term) extends Term
     case class BinaryOperator(operator : Token, left : Term, right : Term) extends Term
 
@@ -196,7 +197,7 @@ object Parser {
                         if(cursor.next() != RightRound()) return Failure("Expected right parenthesis: ')'", Some(cursor.lookBehind()))
                         pattern
                 }
-            case (Underscore(), _) => Success(WildcardPattern)
+            case (Underscore(), _) => Success(WildcardPattern())
             case (Lower(name), _) => Success(VariablePattern(name))
             case (StringValue(value), _) => Success(StringPattern(value))
             case (IntegerValue(value), _) => Success(IntegerPattern(value))
@@ -297,6 +298,7 @@ object Parser {
 
     def parseAtomic(cursor : TokenCursor) : Result[Term] = {
         cursor.lookAhead() match {
+            case JsSnippet(js) => cursor.next(); Success(JsCode(js))
             case Lower(name) => cursor.next(); Success(Variable(name))
             case Upper(name) =>
                 cursor.next()
@@ -342,7 +344,7 @@ object Parser {
     }
 
     def parseProduct(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseNegation, Star(), Slash())
-    def parseSum(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseProduct, Plus(), Minus())
+    def parseSum(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseProduct, Plus(), Minus(), DotDot())
     def parseRelation(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseSum, EqualTo(), NotEqualTo(), LessThan(), LessThanOrEqual(), GreaterThan(), GreaterThanOrEqual())
     def parseAndOr(cursor : TokenCursor) : Result[Term] = leftAssociative(cursor, parseRelation, AndAnd(), OrOr())
 

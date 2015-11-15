@@ -15,7 +15,7 @@ class TypeInference {
 
     def checkPattern(pattern : Pattern) : Type = pattern match {
         // TODO: Check exhaustiveness
-        case WildcardPattern => NonRigidType(typeVariables.fresh())
+        case WildcardPattern() => NonRigidType(typeVariables.fresh())
         case VariablePattern(name) =>
             val resultType = NonRigidType(typeVariables.fresh())
             variables.set(name, Scheme(List(), List(), resultType))
@@ -74,13 +74,14 @@ class TypeInference {
     }
 
     def checkTerm(term : Term) : Type = term match {
+        case JsCode(_) => NonRigidType(typeVariables.fresh())
         case Variable(name) => variables.get(name) match {
             case None => throw new RuntimeException("Unknown variable: " + name)
             case Some(scheme) => instantiate(scheme)
         }
         case Lambda(cases) =>
             val skipPatterns = cases.head._1.isEmpty
-            val firstPatterns = if(cases.head._1.isEmpty) cases.head._1 else List(RecordPattern(List()))
+            val firstPatterns = if(!skipPatterns) cases.head._1 else List(RecordPattern(List()))
             val parameterTypes = firstPatterns.map(_ => NonRigidType(typeVariables.fresh()))
             val returnType = NonRigidType(typeVariables.fresh())
             val functionType = FunctionType(parameterTypes, returnType)
@@ -88,7 +89,10 @@ class TypeInference {
                 val (oldVariables, oldExtracts) = (variables.copy, extracts.copy)
                 // TODO: Check that variables do not occur twice in each case
                 if(!skipPatterns) {
-                    if(firstPatterns.length != patterns.length) throw new RuntimeException("Expected " + firstPatterns.length + " patterns, but got " + patterns.length)
+                    if(firstPatterns.length != patterns.length) {
+                        println(firstPatterns)
+                        throw new RuntimeException("Expected " + firstPatterns.length + " patterns, but got " + patterns.length)
+                    }
                     for((pattern, expectedType) <- patterns zip parameterTypes) {
                         val patternType = checkPattern(pattern)
                         unify(expectedType, patternType)
@@ -192,6 +196,10 @@ class TypeInference {
             unify(ConstantType("Int", List()), checkTerm(left))
             unify(ConstantType("Int", List()), checkTerm(right))
             ConstantType("Int", List())
+        case BinaryOperator(Tokenizer.DotDot(), left, right) =>
+            unify(ConstantType("String", List()), checkTerm(left))
+            unify(ConstantType("String", List()), checkTerm(right))
+            ConstantType("String", List())
         case BinaryOperator(token, left, right) if Seq(Tokenizer.AndAnd(), Tokenizer.OrOr()).contains(token) =>
             unify(ConstantType("Bool", List()), checkTerm(left))
             unify(ConstantType("Bool", List()), checkTerm(right))

@@ -44,7 +44,7 @@ class Emitter(emit : String => Unit) {
         var emitted = false
         def and() = if(emitted) emit(" && ") else emitted = true
         def condition(pattern: Pattern, path : String) : Unit = pattern match {
-            case WildcardPattern =>
+            case WildcardPattern() =>
             case VariablePattern(name) =>
                 bindings += "var " + mangle(name) + " = " + path + ";\n"
             case ConstructorPattern("True", List()) => // TODO: Better check
@@ -167,6 +167,8 @@ class Emitter(emit : String => Unit) {
                     emitTerm(element)
                 }
                 emit("]")
+            case JsCode(js) =>
+                emit(js)
             case StringLiteral(value) =>
                 emit(escapeString(value))
             case IntegerLiteral(value) =>
@@ -185,6 +187,7 @@ class Emitter(emit : String => Unit) {
                 emit(" " + (operator match {
                     case Minus() => "-"
                     case Plus() => "+"
+                    case DotDot() => "+"
                     case Slash() => "/"
                     case Star() => "*"
                     case AndAnd() => "&&"

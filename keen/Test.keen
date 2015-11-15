@@ -1,0 +1,60 @@
+Bool := [True, False]
+Int := []
+String := []
+
+if := {
+    |True| {|then| {|_| then() }}
+    |False| {|_| {|else| else() }}
+}
+
+when := {|condition| {|body| if(condition){ body(); () }{} }}
+
+unless := {|condition| {|body| if(condition){}{ body(); () } }}
+
+while := {|condition| {|body|
+    when(condition()) {
+        body()
+        while(condition)(body)
+    }
+}}
+
+repeat := {|count| {|body|
+    i := 0
+    while { i < count } {
+        body(i)
+        i += 1
+    }
+}}
+
+point := (x = 5, y = 'foo')
+
+text : (name : String) -> String = {|r| r.name}
+
+Foo := [Foo(name : String, id : a -> a)]
+
+foo := Foo(name = 'Str', id = {|x| x})
+
+Ref<t> := [Ref(
+    get : () -> t,
+    set : t -> ()
+)]
+
+ref := {|state|
+    Ref(get = {state}, set = {|new| state = new })
+}
+
+Option<a> := [None, Some(value : a)]
+
+x1 := ref(None)
+
+x1.set(Some(value = 7))
+
+x2 : Option<Int> = x1.get()
+
+f : a -> Int & a.x : b & b.test : c & c.hest : Int = {|(x = y)|
+    z := y.test
+    z.hest + 1
+}
+
+
+flatten : a -> b & a.toArray : b = {|a| a.toArray }
