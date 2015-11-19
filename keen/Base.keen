@@ -50,7 +50,7 @@ forceOption : Option<a> -> a = {
 
 
 each : Array<a> -> (a -> b) -> () = {|array| {|body|
-    #js for(var i = 0; i < array.length; i++) {
+    #js for(var i = 0, l = array.length; i < l; i++) {
     element := #js array[i]
     body(element)
     #js }
@@ -59,7 +59,7 @@ each : Array<a> -> (a -> b) -> () = {|array| {|body|
 
 map : Array<a> -> (a -> b) -> Array<b> = {|array| {|body|
     results := []
-    #js for(var i = 0; i < array.length; i++) {
+    #js for(var i = 0, l = array.length; i < l; i++) {
     element := #js array[i]
     result := body(element)
     #js results.push(result)
@@ -69,7 +69,7 @@ map : Array<a> -> (a -> b) -> Array<b> = {|array| {|body|
 
 filter : Array<a> -> (a -> Bool) -> Array<a> = {|array| {|body|
     results := []
-    #js for(var i = 0; i < array.length; i++) {
+    #js for(var i = 0, l = array.length; i < l; i++) {
     element := #js array[i]
     when(body(element)) {
         #js results.push(element)
@@ -80,8 +80,8 @@ filter : Array<a> -> (a -> Bool) -> Array<a> = {|array| {|body|
 
 flatten : Array<Array<a>> -> Array<a> = {|array|
     results := []
-    #js for(var i = 0; i < array.length; i++) {
-    #js for(var j = 0; j < array[i].length; j++) {
+    #js for(var i = 0, l = array.length; i < l; i++) {
+    #js for(var j = 0, k = array[i].length; j < k; j++) {
     element := #js array[i][j]
     #js results.push(element)
     #js }
@@ -89,17 +89,26 @@ flatten : Array<Array<a>> -> Array<a> = {|array|
     results
 }
 
-flatMap : Array<Array<a>> -> (a -> b) -> Array<b> = {|array| {|body|
+flatMap : Array<a> -> (a -> Array<b>) -> Array<b> = {|array| {|body|
     results := []
-    #js for(var i = 0; i < array.length; i++) {
-    #js for(var j = 0; j < array[i].length; j++) {
-    element := #js array[i][j]
-    result := body(element)
-    #js results.push(result)
+    #js for(var i = 0, l = array.length; i < l; i++) {
+    element := #js array[i]
+    produced := body(element)
+    #js for(var j = 0, k = produced.length; j < k; j++) {
+    #js results.push(produced[j])
     #js }
     #js }
     results
 }}
+
+at : (Array<a>, Int) -> Option<a> = {|array, n|
+    #js if(n < 0 || n >= array.length) {
+    none := None
+    #js return none
+    #js }
+    result := #js array[n]
+    Some(value = result)
+}
 
 length : Array<a> -> Int = {|array|
     #js array.length
