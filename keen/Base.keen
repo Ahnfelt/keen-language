@@ -114,9 +114,8 @@ length : Array<a> -> Int = {|array|
     #js array.length
 }
 
-// The interface should be ... different.
-sort : Array<a> -> ((a, a) -> Int) -> Array<a> = {|array| {|order|
-    #js array.slice().sort(order)
+sort : Array<a> -> ((a, a) -> Bool) -> Array<a> = {|array| {|before|
+    #js array.slice().sort(function(a, b) { return before(a, b) ? -1 : before(b, a) ? 1 : 0 })
 }}
 
 reverse : Array<a> -> Array<a> = {|array|
