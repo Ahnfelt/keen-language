@@ -29,12 +29,26 @@ while : (() -> Bool) -> (() -> a) -> () = {|condition| {|body|
 switch : a -> (a -> b) -> b = {|x| {|f| f(x) }}
 
 
+some : a -> Option<a> = {|a| Some(value = a)}
+
 mapOption : Option<a> -> (a -> b) -> Option<b> = {|option| {|body|
     switch(option) {
         |Some(value = a)| Some(value = body(a))
         |None| None
     }
 }}
+
+flatMapOption : Option<a> -> (a -> Option<b>) -> Option<b> = {|option| {|body|
+    switch(option) {
+        |Some(value = a)| body(a)
+        |None| None
+    }
+}}
+
+flattenOption : Option<Option<a>> -> Option<a> = {
+    |Some(value = a)| a
+    |None| None
+}
 
 getOption : Option<a> -> (() -> a) -> a = {|option| {|default|
     switch(option) {
@@ -120,4 +134,11 @@ sort : Array<a> -> ((a, a) -> Bool) -> Array<a> = {|array| {|before|
 
 reverse : Array<a> -> Array<a> = {|array|
     #js array.slice().reverse()
+}
+
+slice : (Array<a>, Option<Int>, Option<Int>) -> Array<a> = {
+    |array, Some(value = from), Some(value = to)| #js array.slice(from, to)
+    |array, Some(value = from), None| #js array.slice(from)
+    |array, None, Some(value = to)| #js array.slice(0, to)
+    |array, None, None| #js array.slice()
 }
