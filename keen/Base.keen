@@ -1,3 +1,5 @@
+#export reverse, slice
+
 Int := []
 String := []
 Array<a> := []

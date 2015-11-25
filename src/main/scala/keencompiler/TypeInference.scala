@@ -4,6 +4,7 @@ import keencompiler.Parser._
 import keencompiler.TypeInference._
 
 import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
 
 class TypeInference {
 
@@ -301,8 +302,20 @@ class TypeInference {
         RecordType(List())
     }
 
-    def checkProgram(program : List[Statement]) : Unit = {
-        val resultType = checkStatements(program)
+    def checkProgram(module : Module) : Unit = {
+        val resultType = checkStatements(module.statements)
+        val exportedVariableNames = module.exportedVariables.toSet
+        val exportedVariableSchemes = ListBuffer[(String, Scheme)]()
+        for(statement <- module.statements) statement match {
+            case VariableStatement(name, None, _) if exportedVariableNames(name) =>
+                throw new RuntimeException("Missing type annotation for exported variable: " + name)
+            case VariableStatement(name, Some(scheme), _) if exportedVariableNames(name) =>
+                exportedVariableSchemes += (name -> scheme)
+            case _ => // OK
+        }
+        val missingVariables = exportedVariableNames -- exportedVariableSchemes.map(_._1)
+        if(missingVariables.nonEmpty) throw new RuntimeException("The following symbols were exported, but have no definition: " + missingVariables)
+        println(exportedVariableSchemes)
         unify(RecordType(List()), resultType)
     }
 

@@ -76,7 +76,7 @@ object Tokenizer {
         val Seq(lower, upper, js, sharp, andOr, bracket, punctuation, assign, operator, relation, single, integer, line, comment) = (1 to 14).map(matcher.group)
         if(lower != null) Lower(lower)
         else if(upper != null) Upper(upper)
-        else if(sharp != null) Sharp(sharp)
+        else if(sharp != null) Sharp(sharp.tail)
         else if(js != null) JsSnippet(js)
         else if(bracket != null) bracket match {
             case "(" => LeftRound()

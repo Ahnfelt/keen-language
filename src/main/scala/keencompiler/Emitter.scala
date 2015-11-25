@@ -32,7 +32,7 @@ class Emitter(emit : String => Unit) {
     }
 
     def mangleLabelUsage(name : String) = {
-        if(reserved(name)) "[" + escapeString(name) + "]" else "." + name
+        if(reserved(name) || !name.matches("[a-zA-Z][a-zA-Z0-9]*")) "[" + escapeString(name) + "]" else "." + name
     }
 
     def escapeString(value : String) = {
@@ -231,14 +231,28 @@ class Emitter(emit : String => Unit) {
         }
     }
 
-    def emitProgram(statements : List[Statement]) : Unit = {
-        for(s <- statements) emitStatement(s)
+    def emitProgram(module : Module) : Unit = {
+        emit("(function(_global) {\n")
+        for(s <- module.statements) emitStatement(s)
+        emit("if(_global.keen == null) _global.keen = {modules: {}};\n")
+        emit("_global.keen.modules" + mangleLabelUsage(module.fullName) + " = {\n")
+        var first = true
+        val exportedVariableNames = module.exportedVariables.toSet
+        for(s <- module.statements) yield s match {
+            case VariableStatement(name, _, _) if exportedVariableNames.contains(name) =>
+                if(!first) emit(",\n")
+                emit(mangleLabelDefinition(name) + ": " + mangle(name))
+                first = false
+            case _ => // OK
+        }
+        emit("\n};\n")
+        emit("})(this);\n")
     }
 
     def main(args: Array[String]) {
         val tokens = tokenize(p2)
         val cursor = TokenCursor(tokens, 3)
-        parseProgram(cursor) match {
+        parseProgram("ahnfelt/keen-base:source/Base.keen", cursor) match {
             case Success(program) => emitProgram(program)
             case failure : Failure => throw failure
         }

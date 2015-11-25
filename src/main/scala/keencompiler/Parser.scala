@@ -10,6 +10,12 @@ object Parser {
     // Using + etc. generates: t1.+ : t1 -> t1, which is only satisfiable by t1 = Float or t1 = Int.
     // Polymorphic fields, eg. t1.f : Int -> Int, t1.f : String -> String is reduced to t1.f : forall a. a -> a
 
+    case class Module(
+        fullName : String,
+        exportedVariables : List[String],
+        statements : List[Statement]
+    )
+
     sealed abstract class Type(var position : Position = null)
     case class FunctionType(parameters : List[Type], returns : Type) extends Type {
         override def toString = {
@@ -567,11 +573,43 @@ object Parser {
         Success(list.toList)
     }
 
-    def parseProgram(cursor : TokenCursor) : Result[List[Statement]] = {
+    def parseExport(cursor : TokenCursor) : List[String] = {
+        val exportedVariables = ListBuffer[String]()
+        while(cursor.lookAhead().isInstanceOf[Sharp]) cursor.next() match {
+            case Sharp("export") =>
+                cursor.next() match {
+                    case Lower(name) => exportedVariables += name
+                    case _ => throw Failure("Expected export symbol", Some(cursor.lookBehind()))
+                }
+                while(cursor.lookAhead() == Comma()) {
+                    cursor.next()
+                    cursor.next() match {
+                        case Lower(name) => exportedVariables += name
+                        case _ => throw Failure("Expected export symbol", Some(cursor.lookBehind()))
+                    }
+                }
+                val next = cursor.next()
+                if(next != LineBreak() && next != OutsideFile()) throw Failure("Expected line break or comma", Some(next))
+            case Sharp(keyword) =>
+                throw Failure("Unknown keyword", Some(cursor.lookBehind()))
+        }
+        exportedVariables.toList
+    }
+
+    def parseProgram(fullModuleName : String, cursor : TokenCursor) : Result[Module] = {
+        val exportedVariables = ListBuffer[String]()
+        while(cursor.lookAhead().isInstanceOf[Sharp]) cursor.lookAhead() match {
+            case Sharp("export") => exportedVariables ++= parseExport(cursor)
+            case Sharp(keyword) => throw Failure("Unknown keyword", Some(cursor.lookAhead()))
+        }
         parseStatements(cursor) match {
             case failure : Failure => failure
             case _ if cursor.lookAhead() != OutsideFile() => Failure("Expected end of file", Some(cursor.lookAhead()))
-            case success => success
+            case Success(statements) => Success(Module(
+                fullName = fullModuleName,
+                exportedVariables = exportedVariables.toList,
+                statements = statements
+            ))
         }
     }
 
@@ -579,7 +617,7 @@ object Parser {
     def main(args: Array[String]) {
         val tokens = tokenize(p0)
         val cursor = TokenCursor(tokens, 3)
-        println(parseProgram(cursor))
+        println(parseProgram("ahnfelt/keen-base:source/Base.keen", cursor))
     }
 
     val p0 = """
