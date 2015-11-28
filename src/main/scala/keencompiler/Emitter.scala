@@ -237,13 +237,10 @@ class Emitter(emit : String => Unit) {
         emit("if(_global.keen == null) _global.keen = {modules: {}};\n")
         emit("_global.keen.modules" + mangleLabelUsage(module.fullName) + " = {\n")
         var first = true
-        val exportedVariableNames = module.exportedVariables.toSet
-        for(s <- module.statements) yield s match {
-            case VariableStatement(name, _, _) if exportedVariableNames.contains(name) =>
-                if(!first) emit(",\n")
-                emit(mangleLabelDefinition(name) + ": " + mangle(name))
-                first = false
-            case _ => // OK
+        for(s <- module.exportedVariables) {
+            if(!first) emit(",\n")
+            emit(mangleLabelDefinition(s.name) + ": " + mangle(s.name))
+            first = false
         }
         emit("\n};\n")
         emit("})(this);\n")

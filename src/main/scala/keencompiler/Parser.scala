@@ -2,6 +2,7 @@ package keencompiler
 
 import keencompiler.Tokenizer.{Position, Token}
 
+import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
 object Parser {
@@ -12,7 +13,8 @@ object Parser {
 
     case class Module(
         fullName : String,
-        exportedVariables : List[String],
+        exportedVariables : List[VariableStatement],
+        exportedTypes : List[SumTypeStatement],
         statements : List[Statement]
     )
 
@@ -573,18 +575,31 @@ object Parser {
         Success(list.toList)
     }
 
-    def parseExport(cursor : TokenCursor) : List[String] = {
+    def parseExport(cursor : TokenCursor) : (List[String], List[String], List[String]) = {
         val exportedVariables = ListBuffer[String]()
+        val concreteTypes = ListBuffer[String]()
+        val abstractTypes = ListBuffer[String]()
+        def parseTypeExport(name : String) = {
+            if(cursor.lookAhead() == LeftSquare()) {
+                cursor.next()
+                if(cursor.next() != RightSquare()) throw Failure("Expected right bracket: ]", Some(cursor.lookBehind()))
+                abstractTypes += name
+            } else {
+                concreteTypes += name
+            }
+        }
         while(cursor.lookAhead().isInstanceOf[Sharp]) cursor.next() match {
             case Sharp("export") =>
                 cursor.next() match {
                     case Lower(name) => exportedVariables += name
+                    case Upper(name) => parseTypeExport(name)
                     case _ => throw Failure("Expected export symbol", Some(cursor.lookBehind()))
                 }
                 while(cursor.lookAhead() == Comma()) {
                     cursor.next()
                     cursor.next() match {
                         case Lower(name) => exportedVariables += name
+                        case Upper(name) => parseTypeExport(name)
                         case _ => throw Failure("Expected export symbol", Some(cursor.lookBehind()))
                     }
                 }
@@ -593,23 +608,42 @@ object Parser {
             case Sharp(keyword) =>
                 throw Failure("Unknown keyword", Some(cursor.lookBehind()))
         }
-        exportedVariables.toList
+        (exportedVariables.toList, concreteTypes.toList, abstractTypes.toList)
     }
 
     def parseProgram(fullModuleName : String, cursor : TokenCursor) : Result[Module] = {
-        val exportedVariables = ListBuffer[String]()
+        val exportedVariables = mutable.HashSet[String]()
+        val concreteTypes = mutable.HashSet[String]()
+        val abstractTypes = mutable.HashSet[String]()
         while(cursor.lookAhead().isInstanceOf[Sharp]) cursor.lookAhead() match {
-            case Sharp("export") => exportedVariables ++= parseExport(cursor)
+            case Sharp("export") =>
+                val (newExported, newConcrete, newAbstract) = parseExport(cursor)
+                exportedVariables ++= newExported
+                concreteTypes ++= newConcrete
+                abstractTypes ++= newAbstract
             case Sharp(keyword) => throw Failure("Unknown keyword", Some(cursor.lookAhead()))
         }
         parseStatements(cursor) match {
             case failure : Failure => failure
             case _ if cursor.lookAhead() != OutsideFile() => Failure("Expected end of file", Some(cursor.lookAhead()))
-            case Success(statements) => Success(Module(
-                fullName = fullModuleName,
-                exportedVariables = exportedVariables.toList,
-                statements = statements
-            ))
+            case Success(statements) =>
+                val definedExportedVariables = statements.collect {
+                    case s : VariableStatement if exportedVariables(s.name) => s
+                }
+                val definedExportedTypes = statements.collect {
+                    case s : SumTypeStatement if concreteTypes.contains(s.name) => s
+                    case s : SumTypeStatement if abstractTypes.contains(s.name) => s.copy(constructors = List())
+                }
+                val missingVariables = exportedVariables -- definedExportedVariables.map(_.name)
+                if(missingVariables.nonEmpty) throw Failure("The following symbols were exported, but have no definition: " + missingVariables.mkString(","), None)
+                val missingTypes = (concreteTypes ++ abstractTypes) -- definedExportedTypes.map(_.name)
+                if(missingTypes.nonEmpty) throw Failure("The following types were exported, but have no definition: " + missingTypes.mkString(","), None)
+                Success(Module(
+                    fullName = fullModuleName,
+                    exportedVariables = definedExportedVariables,
+                    exportedTypes = definedExportedTypes,
+                    statements = statements
+                ))
         }
     }
 

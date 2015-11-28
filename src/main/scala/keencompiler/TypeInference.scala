@@ -304,18 +304,25 @@ class TypeInference {
 
     def checkProgram(module : Module) : Unit = {
         val resultType = checkStatements(module.statements)
-        val exportedVariableNames = module.exportedVariables.toSet
+        val exportedVariableNames = module.exportedVariables.map(_.name).toSet
+        val exportedTypeNames = module.exportedTypes.map(_.name).toSet
         val exportedVariableSchemes = ListBuffer[(String, Scheme)]()
+        val exportedTypes = ListBuffer[SumTypeStatement]()
         for(statement <- module.statements) statement match {
             case VariableStatement(name, None, _) if exportedVariableNames(name) =>
                 throw new RuntimeException("Missing type annotation for exported variable: " + name)
             case VariableStatement(name, Some(scheme), _) if exportedVariableNames(name) =>
                 exportedVariableSchemes += (name -> scheme)
+            case s : SumTypeStatement if exportedTypeNames(s.name) =>
+                exportedTypes += s
             case _ => // OK
         }
         val missingVariables = exportedVariableNames -- exportedVariableSchemes.map(_._1)
-        if(missingVariables.nonEmpty) throw new RuntimeException("The following symbols were exported, but have no definition: " + missingVariables)
+        if(missingVariables.nonEmpty) throw new RuntimeException("The following symbols were exported, but have no definition: " + missingVariables.mkString(","))
+        val missingTypes = exportedTypeNames -- exportedTypes.map(_.name)
+        if(missingTypes.nonEmpty) throw new RuntimeException("The following types were exported, but have no definition: " + missingTypes.mkString(","))
         println(exportedVariableSchemes)
+        println(exportedTypes)
         unify(RecordType(List()), resultType)
     }
 
