@@ -1,4 +1,7 @@
-#export reverse, slice
+#export Int [], String [], Array [], Option, Bool
+#export error, if, when, unless, while, switch
+#export some, mapOption, flatMapOption, flattenOption, getOption, forceOption
+#export each, map, filter, flatten, flatMap, at, length, sort, reverse, slice
 
 Int := []
 String := []
@@ -12,14 +15,14 @@ error : String -> a = {|message|
     #js void 0
 }
 
-if := {
+if : Bool -> (() -> a) -> (() -> a) -> a = {
     |True| {|then| {|_| then() }}
     |False| {|_| {|else| else() }}
 }
 
-when := {|condition| {|body| if(condition){ body(); () }{} }}
+when : Bool -> (() -> a) -> () = {|condition| {|body| if(condition){ body(); () }{} }}
 
-unless := {|condition| {|body| if(condition){}{ body(); () } }}
+unless : Bool -> (() -> a) -> () = {|condition| {|body| if(condition){}{ body(); () } }}
 
 while : (() -> Bool) -> (() -> a) -> () = {|condition| {|body|
     when(condition()) {
