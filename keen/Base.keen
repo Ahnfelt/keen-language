@@ -3,11 +3,11 @@
 #export some, mapOption, flatMapOption, flattenOption, getOption, forceOption
 #export each, map, filter, flatten, flatMap, at, length, sort, reverse, slice
 
-Int := []
-String := []
-Array<a> := []
-Option<a> := [None, Some(value : a)]
-Bool := [False, True]
+#data Int []
+#data String []
+#data Array<a> []
+#data Option<a> [None, Some(value : a)]
+#data Bool [False, True]
 
 
 error : String -> a = {|message|

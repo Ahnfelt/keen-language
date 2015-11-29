@@ -491,11 +491,13 @@ object Parser {
     }
 
     def parseSumTypeStatement(cursor : TokenCursor) : Result[SumTypeStatement] = {
+        if(cursor.next() != Sharp("data")) throw new Failure("Expected #data", Some(cursor.lookBehind()))
         cursor.next() match {
             case Upper(name) =>
-                val parameters = cursor.next() match {
-                    case Colon() => List[String]()
+                val parameters = cursor.lookAhead() match {
+                    case LeftSquare() => List[String]()
                     case LessThan() =>
+                        cursor.next()
                         def nextParameter() = cursor.next() match {
                             case Lower(x) => x
                             case _ => throw new Failure("Expected a lowercase type parameter", Some(cursor.lookBehind()))
@@ -507,10 +509,8 @@ object Parser {
                             list += nextParameter()
                         }
                         if(cursor.next() != GreaterThan()) throw new Failure("Expected '>'", Some(cursor.lookBehind()))
-                        if(cursor.next() != Colon()) throw new Failure("Expected ':'", Some(cursor.lookBehind()))
                         list.toList
                 }
-                if(cursor.next() != Equals()) throw new Failure("Expected '='", Some(cursor.lookBehind()))
                 if(cursor.next() != LeftSquare()) throw new Failure("Expected '['", Some(cursor.lookBehind()))
                 val constructors = ListBuffer[ConstructorDefinition]()
                 if(cursor.lookAhead() != RightSquare()) {
@@ -552,9 +552,9 @@ object Parser {
 
     def parseStatement(cursor : TokenCursor) : Result[Statement] = {
         (cursor.lookAhead(), cursor.nextLookAhead(), cursor.nextNextLookAhead()) match {
-            case (Upper(_), token, _) if token == LessThan() || token == Colon() => parseSumTypeStatement(cursor)
             case (Lower(_), Colon(), _) => parseVariableStatement(cursor)
             case (Lower(_), o, _) if o == Equals() || o == MinusEquals() || o == PlusEquals() || o == StarEquals() => parseAssignStatement(cursor)
+            case (Sharp("data"), _, _) => parseSumTypeStatement(cursor)
             case (Sharp(_), _, _) => // Treat imports etc. as single line comments for now
                 while(cursor.lookAhead() != LineBreak() && cursor.lookAhead() != OutsideFile()) cursor.next()
                 cursor.next()
@@ -588,25 +588,23 @@ object Parser {
                 concreteTypes += name
             }
         }
-        while(cursor.lookAhead().isInstanceOf[Sharp]) cursor.next() match {
-            case Sharp("export") =>
+        while(cursor.lookAhead() == Sharp("export")) {
+            cursor.next()
+            cursor.next() match {
+                case Lower(name) => exportedVariables += name
+                case Upper(name) => parseTypeExport(name)
+                case _ => throw Failure("Expected export symbol", Some(cursor.lookBehind()))
+            }
+            while(cursor.lookAhead() == Comma()) {
+                cursor.next()
                 cursor.next() match {
                     case Lower(name) => exportedVariables += name
                     case Upper(name) => parseTypeExport(name)
                     case _ => throw Failure("Expected export symbol", Some(cursor.lookBehind()))
                 }
-                while(cursor.lookAhead() == Comma()) {
-                    cursor.next()
-                    cursor.next() match {
-                        case Lower(name) => exportedVariables += name
-                        case Upper(name) => parseTypeExport(name)
-                        case _ => throw Failure("Expected export symbol", Some(cursor.lookBehind()))
-                    }
-                }
-                val next = cursor.next()
-                if(next != LineBreak() && next != OutsideFile()) throw Failure("Expected line break or comma", Some(next))
-            case Sharp(keyword) =>
-                throw Failure("Unknown keyword", Some(cursor.lookBehind()))
+            }
+            val next = cursor.next()
+            if(next != LineBreak() && next != OutsideFile()) throw Failure("Expected line break or comma", Some(next))
         }
         (exportedVariables.toList, concreteTypes.toList, abstractTypes.toList)
     }
@@ -615,13 +613,11 @@ object Parser {
         val exportedVariables = mutable.HashSet[String]()
         val concreteTypes = mutable.HashSet[String]()
         val abstractTypes = mutable.HashSet[String]()
-        while(cursor.lookAhead().isInstanceOf[Sharp]) cursor.lookAhead() match {
-            case Sharp("export") =>
-                val (newExported, newConcrete, newAbstract) = parseExport(cursor)
-                exportedVariables ++= newExported
-                concreteTypes ++= newConcrete
-                abstractTypes ++= newAbstract
-            case Sharp(keyword) => throw Failure("Unknown keyword", Some(cursor.lookAhead()))
+        while(cursor.lookAhead() == Sharp("export")) {
+            val (newExported, newConcrete, newAbstract) = parseExport(cursor)
+            exportedVariables ++= newExported
+            concreteTypes ++= newConcrete
+            abstractTypes ++= newAbstract
         }
         parseStatements(cursor) match {
             case failure : Failure => failure

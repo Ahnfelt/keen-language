@@ -1,6 +1,6 @@
-Bool := [True, False]
-Int := []
-String := []
+#data Bool [False, True]
+#data Int []
+#data String []
 
 if := {
     |True| {|then| {|_| then() }}
