@@ -233,6 +233,9 @@ class Emitter(emit : String => Unit) {
 
     def emitProgram(module : Module) : Unit = {
         emit("(function(_global) {\n")
+        for(m <- module.importedModules) {
+            emit("var " + m.alias + " = _global.keen.modules" + mangleLabelUsage(m.moduleName) + ";\n")
+        }
         for(s <- module.statements) emitStatement(s)
         emit("if(_global.keen == null) _global.keen = {modules: {}};\n")
         emit("_global.keen.modules" + mangleLabelUsage(module.fullName) + " = {\n")

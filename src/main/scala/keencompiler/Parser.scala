@@ -13,10 +13,13 @@ object Parser {
 
     case class Module(
         fullName : String,
+        importedModules : List[Import],
         exportedVariables : List[VariableStatement],
         exportedTypes : List[SumTypeStatement],
         statements : List[Statement]
     )
+
+    case class Import(alias : String, moduleName : String)
 
     sealed abstract class Type(var position : Position = null)
     case class FunctionType(parameters : List[Type], returns : Type) extends Type {
@@ -428,7 +431,9 @@ object Parser {
 
     def parseConstructorDefinition(cursor : TokenCursor) : Result[ConstructorDefinition] = {
         val name = cursor.next() match {
-            case Upper(x) => x
+            case Upper(x) =>
+                if(x.contains(".")) throw Failure("Unexpected dot (.) in constructor name", Some(cursor.lookBehind()))
+                x
             case _ => return Failure("Expected type constructor", Some(cursor.lookBehind()))
         }
         if(cursor.lookAhead() != LeftRound()) {
@@ -443,7 +448,10 @@ object Parser {
         cursor.lookAhead() match {
             case LeftRound() => parseParenthesisType(cursor)
             case Upper(_) => Success(List(require(parseConstantType(cursor))))
-            case Lower(name) => cursor.next(); Success(List(RigidType(name)))
+            case Lower(name) =>
+                cursor.next()
+                if(name.contains(".")) throw Failure("Unexpected dot (.) in type parameter", Some(cursor.lookBehind()))
+                Success(List(RigidType(name)))
         }
     }
 
@@ -494,12 +502,15 @@ object Parser {
         if(cursor.next() != Sharp("data")) throw new Failure("Expected #data", Some(cursor.lookBehind()))
         cursor.next() match {
             case Upper(name) =>
+                if(name.contains(".")) throw Failure("Unexpected dot (.) in type name", Some(cursor.lookBehind()))
                 val parameters = cursor.lookAhead() match {
                     case LeftSquare() => List[String]()
                     case LessThan() =>
                         cursor.next()
                         def nextParameter() = cursor.next() match {
-                            case Lower(x) => x
+                            case Lower(x) =>
+                                if(x.contains(".")) throw Failure("Unexpected dot (.) in type parameter", Some(cursor.lookBehind()))
+                                x
                             case _ => throw new Failure("Expected a lowercase type parameter", Some(cursor.lookBehind()))
                         }
                         val initial = nextParameter()
@@ -530,6 +541,7 @@ object Parser {
     def parseVariableStatement(cursor : TokenCursor) : Result[VariableStatement] = {
         (cursor.next(), cursor.next()) match {
             case (Lower(name), Colon()) =>
+                if(name.contains(".")) throw Failure("Unexpected dot (.) in variable name", Some(cursor.previousLookBehind()))
                 val scheme = if(cursor.lookAhead() != Equals()) Some(require(parseScheme(cursor))) else None
                 if(cursor.next() != Equals()) throw new Failure("Expected '='", Some(cursor.lookBehind()))
                 val value = require(parseTerm(cursor))
@@ -544,6 +556,7 @@ object Parser {
             case Lower(x) => x
             case _ => throw new Failure("Expected an identifier followed by '='", Some(cursor.lookBehind()))
         }
+        if(name.contains(".")) throw Failure("Unexpected dot (.) in variable name", Some(cursor.lookBehind()))
         val o = cursor.next()
         if(!(o == Equals() || o == MinusEquals() || o == PlusEquals() || o == StarEquals())) throw new Failure("Expected an assignment operator, eg. '='", Some(cursor.lookBehind()))
         val value = require(parseTerm(cursor))
@@ -609,15 +622,38 @@ object Parser {
         (exportedVariables.toList, concreteTypes.toList, abstractTypes.toList)
     }
 
+    def parseImport(cursor : TokenCursor) : Import = cursor.next() match {
+        case Sharp("import") =>
+            val aliasOption = if(!cursor.lookAhead().isInstanceOf[Upper]) None else {
+                val x = cursor.next().asInstanceOf[Upper].text
+                if(cursor.next() != Equals()) throw Failure("Expected an equals sign '='", Some(cursor.lookBehind()))
+                Some(x)
+            }
+            val moduleName = cursor.next() match {
+                case StringValue(x) => x
+                case _ => throw Failure("Expected an string", Some(cursor.lookBehind()))
+            }
+            val alias = aliasOption.getOrElse(moduleName.reverse.takeWhile(_ != '/').reverse.takeWhile(_ != '.'))
+            val next = cursor.next()
+            if(next != LineBreak() && next != OutsideFile()) throw Failure("Expected line break after #import", Some(next))
+            Import(alias, moduleName)
+        case _ =>
+            throw Failure("Expected #import keyword", Some(cursor.lookBehind()))
+    }
+
     def parseProgram(fullModuleName : String, cursor : TokenCursor) : Result[Module] = {
         val exportedVariables = mutable.HashSet[String]()
         val concreteTypes = mutable.HashSet[String]()
         val abstractTypes = mutable.HashSet[String]()
-        while(cursor.lookAhead() == Sharp("export")) {
-            val (newExported, newConcrete, newAbstract) = parseExport(cursor)
-            exportedVariables ++= newExported
-            concreteTypes ++= newConcrete
-            abstractTypes ++= newAbstract
+        val importedModules = ListBuffer[Import]()
+        while(Seq(Sharp("export"), Sharp("import")).contains(cursor.lookAhead())) cursor.lookAhead() match {
+            case Sharp("export") =>
+                val (newExported, newConcrete, newAbstract) = parseExport(cursor)
+                exportedVariables ++= newExported
+                concreteTypes ++= newConcrete
+                abstractTypes ++= newAbstract
+            case Sharp("import") =>
+                importedModules += parseImport(cursor)
         }
         parseStatements(cursor) match {
             case failure : Failure => failure
@@ -636,6 +672,7 @@ object Parser {
                 if(missingTypes.nonEmpty) throw Failure("The following types were exported, but have no definition: " + missingTypes.mkString(","), None)
                 Success(Module(
                     fullName = fullModuleName,
+                    importedModules = importedModules.toList,
                     exportedVariables = definedExportedVariables,
                     exportedTypes = definedExportedTypes,
                     statements = statements

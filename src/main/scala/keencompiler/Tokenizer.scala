@@ -8,8 +8,8 @@ import scala.util.matching.Regex
 object Tokenizer {
 
     val pattern = ("^[ ]*(?:" + """
-       ([a-z][a-zA-Z0-9]*)(?![a-zA-Z0-9])
-       ([A-Z][a-zA-Z0-9]*)(?![a-zA-Z0-9])
+       ((?:[A-Z][a-zA-Z0-9]*[.])?[a-z][a-zA-Z0-9]*)(?![a-zA-Z0-9])
+       ((?:[A-Z][a-zA-Z0-9]*[.])?[A-Z][a-zA-Z0-9]*)(?![a-zA-Z0-9])
        [#]js[ ]([^\r\n]+)
        ([#][a-zA-Z0-9]+)(?![a-zA-Z0-9])
        (\&\&|\|\|)

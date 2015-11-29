@@ -302,7 +302,23 @@ class TypeInference {
         RecordType(List())
     }
 
-    def checkProgram(module : Module) : Unit = {
+    def prepareImports(module : Module, modules : Map[String, Module]) : Unit = {
+        for(i <- module.importedModules) {
+            val imported = modules(i.moduleName)
+            for(variable <- imported.exportedVariables) {
+                variables.set(i.alias + "." + variable.name, qualifyTypes(variable.scheme.get, i.alias))
+            }
+            for(sumType <- imported.exportedTypes) {
+                val statement = sumType.copy(name = i.alias + "." + sumType.name, constructors = sumType.constructors.map { c =>
+                    (i.alias + "." + c._1) -> c._2.map { case (label, scheme) => label -> qualifyTypes(scheme, i.alias) }
+                })
+                sumTypes.set(i.alias + "." + sumType.name, statement)
+            }
+        }
+    }
+
+    def checkProgram(module : Module, modules : Map[String, Module]) : Unit = {
+        prepareImports(module, modules)
         val resultType = checkStatements(module.statements)
         val exportedVariableNames = module.exportedVariables.map(_.name).toSet
         val exportedTypeNames = module.exportedTypes.map(_.name).toSet
@@ -321,8 +337,6 @@ class TypeInference {
         if(missingVariables.nonEmpty) throw new RuntimeException("The following symbols were exported, but have no definition: " + missingVariables.mkString(","))
         val missingTypes = exportedTypeNames -- exportedTypes.map(_.name)
         if(missingTypes.nonEmpty) throw new RuntimeException("The following types were exported, but have no definition: " + missingTypes.mkString(","))
-        println(exportedVariableSchemes)
-        println(exportedTypes)
         unify(RecordType(List()), resultType)
     }
 
@@ -421,6 +435,25 @@ class TypeInference {
         }
         case ConstantType(name, parameters) => ConstantType(name, parameters.map(expand))
         case RecordType(fields) => RecordType(fields.map(field => field._1 -> expand(field._2)))
+    }
+
+    def qualifyTypes(scheme : Scheme, alias : String) : Scheme = {
+        def go(t : Type) : Type = t match {
+            case FunctionType(parameters, returns) => FunctionType(parameters.map(go), go(returns))
+            case RigidType(name) => t
+            case ConstantType(name, parameters) => ConstantType(if(name.contains(".")) name else alias + "." + name, parameters.map(go))
+            case RecordType(fields) => RecordType(fields.map { case (label, fieldType) => (label, go(fieldType)) })
+            case NonRigidType(name) => typeVariables.get(name) match {
+                case None => NonRigidType(name)
+                case Some(typeLookedUp) => go(typeLookedUp)
+            }
+        }
+        scheme.copy(
+            generalType = go(scheme.generalType),
+            fieldConstraints = for((name, c) <- scheme.fieldConstraints) yield {
+                name -> FieldConstraint(c.label, go(c.fieldType))
+            }
+        )
     }
 
     def instantiate(scheme : Scheme, fresh : Option[Map[String, Type]] = None) : Type = {
