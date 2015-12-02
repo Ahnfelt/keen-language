@@ -12,6 +12,7 @@ class TypeInference(fullModuleName : String) {
         if(fullModuleName == "keen/Base.keen") ConstantType(name, parameters.toList)
         else ConstantType("keen/Base.keen#" + name, parameters.toList)
 
+    var aliases = null
     var typeVariables = new TypeVariables()
     var fieldConstraints = new FieldConstraints()
     var variables = new Variables()
@@ -312,10 +313,12 @@ class TypeInference(fullModuleName : String) {
                 variables.set(i.alias + "." + variable.name, variable.scheme.get)
             }
             for(sumType <- imported.exportedTypes) {
-                val statement = sumType.copy(name = sumType.name, constructors = sumType.constructors.map { c =>
+                val statement = sumType.copy(constructors = sumType.constructors.map { c =>
                     (i.alias + "." + c._1) -> c._2
                 })
                 sumTypes.set(sumType.name, statement)
+                // Also make it possible to look it up by the alias
+                sumTypes.set(i.alias + "." + sumType.name.reverse.takeWhile(_ != '#').reverse, statement)
             }
         }
     }
@@ -384,7 +387,9 @@ class TypeInference(fullModuleName : String) {
             for((p1, p2) <- ps1 zip ps2) unify(p1, p2)
             unify(returns1, returns2)
         case (ConstantType(name1, parameters1), ConstantType(name2, parameters2)) =>
-            if(name1 != name2) throw new RuntimeException("Unification expected " + name1 + ", but got " + name2)
+            val qualified1 = sumTypes.get(name1).map(_.name).getOrElse("Unification encountered undefined type: " + name1)
+            val qualified2 = sumTypes.get(name2).map(_.name).getOrElse("Unification encountered undefined type: " + name2)
+            if(qualified1 != qualified2) throw new RuntimeException("Unification expected " + name1 + ", but got " + name2)
             if(parameters1.length != parameters2.length) throw new RuntimeException("Unification expected " + parameters1.length + " type parameters to " + name1 + ", but got " + parameters2.length)
             for((p1, p2) <- parameters1 zip parameters2) unify(p1, p2)
         case (RecordType(fields1), RecordType(fields2)) =>

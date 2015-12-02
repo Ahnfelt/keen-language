@@ -27,7 +27,7 @@ object Main extends JSApp {
                             var request = new XMLHttpRequest();
                             request.open('GET', '""" + escapedImportName + """' + '?' + new Date().getTime(), false);
                             request.send(null);
-                            if (request.status === 200) {
+                            if(request.status === 200) {
                                 request.responseText
                             } else {
                                 null
