@@ -11,15 +11,13 @@
             <button id="check" title="Ctrl+S" onclick="_saveCheck(document.getElementById('editor').value)">Save & check</button>
             <button id="compile" title="Ctrl+Shift+S" onclick="_saveCompile(document.getElementById('editor').value)">Save & compile</button>
             <button id="run" title="Ctrl+Enter" onclick="_saveRun(document.getElementById('editor').value)">Save & run</button>
-            &nbsp;
-            (selection or whole program)
         </div>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.22/require.min.js"></script>
         <script src="target/scala-2.11/keen-compiler-fastopt.js"></script>
         <script>
             function _compile(program) {
                 try {
-                    var compiled = keencompiler.Main().compile('ahnfelt/keen-base:source/Base.keen', program);
+                    var compiled = keencompiler.Main().compile('_', program);
                     document.getElementById('status').textContent = 'Compile successful.';
                     return compiled;
                 } catch(e) {

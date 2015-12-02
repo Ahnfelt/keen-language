@@ -67,7 +67,6 @@ forceOption : Option<a> -> a = {
     |None| error('forceOption(None)')
 }
 
-
 each : Array<a> -> (a -> b) -> () = {|array| {|body|
     #js for(var i = 0, l = array.length; i < l; i++) {
     element := #js array[i]

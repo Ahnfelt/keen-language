@@ -6,7 +6,11 @@ import keencompiler.TypeInference._
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 
-class TypeInference {
+class TypeInference(fullModuleName : String) {
+
+    def baseType(name : String, parameters : Type*) =
+        if(fullModuleName == "keen/Base.keen") ConstantType(name, parameters.toList)
+        else ConstantType("keen/Base.keen#" + name, parameters.toList)
 
     var typeVariables = new TypeVariables()
     var fieldConstraints = new FieldConstraints()
@@ -69,9 +73,9 @@ class TypeInference {
         case ArrayPattern(elements) =>
             val elementType = NonRigidType(typeVariables.fresh())
             for(element <- elements) unify(elementType, checkPattern(element))
-            ConstantType("Array", List(elementType))
-        case StringPattern(value) => ConstantType("String", List())
-        case IntegerPattern(value) => ConstantType("Int", List())
+            baseType("Array", elementType)
+        case StringPattern(value) => baseType("String")
+        case IntegerPattern(value) => baseType("Int")
     }
 
     def checkTerm(term : Term) : Type = term match {
@@ -91,7 +95,6 @@ class TypeInference {
                 // TODO: Check that variables do not occur twice in each case
                 if(!skipPatterns) {
                     if(firstPatterns.length != patterns.length) {
-                        println(firstPatterns)
                         throw new RuntimeException("Expected " + firstPatterns.length + " patterns, but got " + patterns.length)
                     }
                     for((pattern, expectedType) <- patterns zip parameterTypes) {
@@ -182,33 +185,33 @@ class TypeInference {
         case ArrayLiteral(elements) =>
             val elementType = NonRigidType(typeVariables.fresh())
             for(term <- elements) unify(elementType, checkTerm(term))
-            ConstantType("Array", List(elementType))
+            baseType("Array", elementType)
         case StringLiteral(value) =>
-            ConstantType("String", List())
+            baseType("String")
         case IntegerLiteral(value) =>
-            ConstantType("Int", List())
+            baseType("Int")
         case UnaryOperator(Tokenizer.Bang(), operand) =>
-            unify(ConstantType("Bool", List()), checkTerm(operand))
-            ConstantType("Bool", List())
+            unify(baseType("Bool"), checkTerm(operand))
+            baseType("Bool")
         case UnaryOperator(Tokenizer.Minus(), operand) =>
-            unify(ConstantType("Int", List()), checkTerm(operand))
-            ConstantType("Int", List())
+            unify(baseType("Int"), checkTerm(operand))
+            baseType("Int")
         case BinaryOperator(token, left, right) if Seq(Tokenizer.Minus(), Tokenizer.Plus(), Tokenizer.Star(), Tokenizer.Slash()).contains(token) =>
-            unify(ConstantType("Int", List()), checkTerm(left))
-            unify(ConstantType("Int", List()), checkTerm(right))
-            ConstantType("Int", List())
+            unify(baseType("Int"), checkTerm(left))
+            unify(baseType("Int"), checkTerm(right))
+            baseType("Int")
         case BinaryOperator(Tokenizer.DotDot(), left, right) =>
-            unify(ConstantType("String", List()), checkTerm(left))
-            unify(ConstantType("String", List()), checkTerm(right))
-            ConstantType("String", List())
+            unify(baseType("String"), checkTerm(left))
+            unify(baseType("String"), checkTerm(right))
+            baseType("String")
         case BinaryOperator(token, left, right) if Seq(Tokenizer.AndAnd(), Tokenizer.OrOr()).contains(token) =>
-            unify(ConstantType("Bool", List()), checkTerm(left))
-            unify(ConstantType("Bool", List()), checkTerm(right))
-            ConstantType("Bool", List())
+            unify(baseType("Bool"), checkTerm(left))
+            unify(baseType("Bool"), checkTerm(right))
+            baseType("Bool")
         case BinaryOperator(token, left, right) =>
-            unify(ConstantType("Int", List()), checkTerm(left))
-            unify(ConstantType("Int", List()), checkTerm(right))
-            ConstantType("Bool", List())
+            unify(baseType("Int"), checkTerm(left))
+            unify(baseType("Int"), checkTerm(right))
+            baseType("Bool")
     }
 
 
@@ -306,18 +309,18 @@ class TypeInference {
         for(i <- module.importedModules) {
             val imported = modules(i.moduleName)
             for(variable <- imported.exportedVariables) {
-                variables.set(i.alias + "." + variable.name, qualifyTypes(variable.scheme.get, i.alias))
+                variables.set(i.alias + "." + variable.name, variable.scheme.get)
             }
             for(sumType <- imported.exportedTypes) {
-                val statement = sumType.copy(name = i.alias + "." + sumType.name, constructors = sumType.constructors.map { c =>
-                    (i.alias + "." + c._1) -> c._2.map { case (label, scheme) => label -> qualifyTypes(scheme, i.alias) }
+                val statement = sumType.copy(name = sumType.name, constructors = sumType.constructors.map { c =>
+                    (i.alias + "." + c._1) -> c._2
                 })
-                sumTypes.set(i.alias + "." + sumType.name, statement)
+                sumTypes.set(sumType.name, statement)
             }
         }
     }
 
-    def checkProgram(module : Module, modules : Map[String, Module]) : Unit = {
+    def checkModule(module : Module, modules : Map[String, Module]) : Unit = {
         prepareImports(module, modules)
         val resultType = checkStatements(module.statements)
         val exportedVariableNames = module.exportedVariables.map(_.name).toSet
@@ -334,9 +337,9 @@ class TypeInference {
             case _ => // OK
         }
         val missingVariables = exportedVariableNames -- exportedVariableSchemes.map(_._1)
-        if(missingVariables.nonEmpty) throw new RuntimeException("The following symbols were exported, but have no definition: " + missingVariables.mkString(","))
+        //if(missingVariables.nonEmpty) throw new RuntimeException("The following symbols were exported, but have no definition: " + missingVariables.mkString(","))
         val missingTypes = exportedTypeNames -- exportedTypes.map(_.name)
-        if(missingTypes.nonEmpty) throw new RuntimeException("The following types were exported, but have no definition: " + missingTypes.mkString(","))
+        //if(missingTypes.nonEmpty) throw new RuntimeException("The following types were exported, but have no definition: " + missingTypes.mkString(","))
         unify(RecordType(List()), resultType)
     }
 
@@ -435,25 +438,6 @@ class TypeInference {
         }
         case ConstantType(name, parameters) => ConstantType(name, parameters.map(expand))
         case RecordType(fields) => RecordType(fields.map(field => field._1 -> expand(field._2)))
-    }
-
-    def qualifyTypes(scheme : Scheme, alias : String) : Scheme = {
-        def go(t : Type) : Type = t match {
-            case FunctionType(parameters, returns) => FunctionType(parameters.map(go), go(returns))
-            case RigidType(name) => t
-            case ConstantType(name, parameters) => ConstantType(if(name.contains(".")) name else alias + "." + name, parameters.map(go))
-            case RecordType(fields) => RecordType(fields.map { case (label, fieldType) => (label, go(fieldType)) })
-            case NonRigidType(name) => typeVariables.get(name) match {
-                case None => NonRigidType(name)
-                case Some(typeLookedUp) => go(typeLookedUp)
-            }
-        }
-        scheme.copy(
-            generalType = go(scheme.generalType),
-            fieldConstraints = for((name, c) <- scheme.fieldConstraints) yield {
-                name -> FieldConstraint(c.label, go(c.fieldType))
-            }
-        )
     }
 
     def instantiate(scheme : Scheme, fresh : Option[Map[String, Type]] = None) : Type = {

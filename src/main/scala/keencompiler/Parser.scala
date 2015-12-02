@@ -641,7 +641,7 @@ object Parser {
             throw Failure("Expected #import keyword", Some(cursor.lookBehind()))
     }
 
-    def parseProgram(fullModuleName : String, cursor : TokenCursor) : Result[Module] = {
+    def parseModule(fullModuleName : String, cursor : TokenCursor) : Result[Module] = {
         val exportedVariables = mutable.HashSet[String]()
         val concreteTypes = mutable.HashSet[String]()
         val abstractTypes = mutable.HashSet[String]()
@@ -670,6 +670,7 @@ object Parser {
                 if(missingVariables.nonEmpty) throw Failure("The following symbols were exported, but have no definition: " + missingVariables.mkString(","), None)
                 val missingTypes = (concreteTypes ++ abstractTypes) -- definedExportedTypes.map(_.name)
                 if(missingTypes.nonEmpty) throw Failure("The following types were exported, but have no definition: " + missingTypes.mkString(","), None)
+
                 Success(Module(
                     fullName = fullModuleName,
                     importedModules = importedModules.toList,
@@ -680,11 +681,46 @@ object Parser {
         }
     }
 
+    def qualifyModule(module : Module) : Module = {
+
+        val aliases = module.importedModules.map(i => i.alias -> i.moduleName).toMap
+
+        val qualifiedExportedVariables = module.exportedVariables.map(v => v.copy(scheme = Some(qualifyTypes(v.scheme.get, module.fullName, aliases))))
+
+        val qualifiedExportedTypes = module.exportedTypes.map(s => s.copy(module.fullName + "#" + s.name, constructors = s.constructors.map(c =>
+            c._1 -> c._2.map(f => f._1 -> qualifyTypes(f._2, module.fullName, aliases))
+        )))
+
+        module.copy(
+            exportedVariables = qualifiedExportedVariables,
+            exportedTypes = qualifiedExportedTypes
+        )
+    }
+
+    def qualifyTypes(scheme : Scheme, moduleName : String, aliases : Map[String, String]) : Scheme = {
+        def go(t : Type) : Type = t match {
+            case FunctionType(parameters, returns) => FunctionType(parameters.map(go), go(returns))
+            case RigidType(name) => t
+            case ConstantType(name, parameters) if name.contains(".") =>
+                val Array(alias, unqualified) = name.split(".")
+                ConstantType(aliases(alias) + "#" + unqualified, parameters.map(go))
+            case ConstantType(name, parameters) =>
+                ConstantType(moduleName + "#" + name, parameters.map(go))
+            case RecordType(fields) => RecordType(fields.map { case (label, fieldType) => (label, go(fieldType)) })
+            case NonRigidType(name) => throw new RuntimeException("Unexpected type variable: " + name)
+        }
+        scheme.copy(
+            generalType = go(scheme.generalType),
+            fieldConstraints = for((name, c) <- scheme.fieldConstraints) yield {
+                name -> FieldConstraint(c.label, go(c.fieldType))
+            }
+        )
+    }
 
     def main(args: Array[String]) {
         val tokens = tokenize(p0)
         val cursor = TokenCursor(tokens, 3)
-        println(parseProgram("ahnfelt/keen-base:source/Base.keen", cursor))
+        println(parseModule("ahnfelt/keen-base:source/Base.keen", cursor))
     }
 
     val p0 = """

@@ -231,7 +231,7 @@ class Emitter(emit : String => Unit) {
         }
     }
 
-    def emitProgram(module : Module) : Unit = {
+    def emitModule(module : Module) : Unit = {
         emit("(function(_global) {\n")
         for(m <- module.importedModules) {
             emit("var " + m.alias + " = _global.keen.modules" + mangleLabelUsage(m.moduleName) + ";\n")
@@ -252,8 +252,8 @@ class Emitter(emit : String => Unit) {
     def main(args: Array[String]) {
         val tokens = tokenize(p2)
         val cursor = TokenCursor(tokens, 3)
-        parseProgram("ahnfelt/keen-base:source/Base.keen", cursor) match {
-            case Success(program) => emitProgram(program)
+        parseModule("ahnfelt/keen-base:source/Base.keen", cursor) match {
+            case Success(program) => emitModule(program)
             case failure : Failure => throw failure
         }
         Thread.sleep(100)
