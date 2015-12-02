@@ -263,8 +263,8 @@ class TypeInference(fullModuleName : String) {
                     variables.set(statement.name, scheme)
                 } else {
                     // Value restriction
-                    println(statement.name + " : " + valueType)
-                    variables.set(statement.name, Scheme(List(), List(), valueType))
+                    println(statement.name + " : " + expand(valueType))
+                    variables.set(statement.name, Scheme(List(), List(), expand(valueType)))
                 }
 
         }

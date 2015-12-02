@@ -9,7 +9,6 @@
 #data Option<a> [None, Some(value : a)]
 #data Bool [False, True]
 
-
 error : String -> a = {|message|
     #js throw message
     #js void 0

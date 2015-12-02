@@ -37,7 +37,8 @@ object Parser {
     case class ConstantType(name : String, parameters : List[Type]) extends Type {
         override def toString = {
             val parametersString = parameters match { case List() => ""; case _ => "<" + parameters.map(_.toString).mkString(", ") + ">" }
-            name + parametersString
+            val shortName = if(name.startsWith("keen/Base.keen#")) name.drop("keen/Base.keen#".length) else name
+            shortName + parametersString
         }
     }
     case class RecordType(fields : List[(String, Type)]) extends Type {
