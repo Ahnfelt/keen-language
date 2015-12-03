@@ -1,0 +1,4 @@
+#import 'keen/Base.keen'
+
+Base.error('This should happen!!!11one')
+

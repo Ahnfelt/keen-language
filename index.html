@@ -12,7 +12,6 @@
             <button id="compile" title="Ctrl+Shift+S" onclick="_saveCompile(document.getElementById('editor').value)">Save & compile</button>
             <button id="run" title="Ctrl+Enter" onclick="_saveRun(document.getElementById('editor').value)">Save & run</button>
         </div>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.22/require.min.js"></script>
         <script src="target/scala-2.11/keen-compiler-fastopt.js"></script>
         <script>
             function _compile(program) {
