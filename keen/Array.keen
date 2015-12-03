@@ -1,0 +1,82 @@
+#import Base = 'keen/Base.keen'
+#export each, map, filter, flatten, flatMap, at, length, sort, reverse, slice
+
+each : Base.Array<a> -> (a -> b) -> () = {|array| {|body|
+    #js for(var i = 0, l = array.length; i < l; i++) {
+    element := #js array[i]
+    body(element)
+    #js }
+    ()
+}}
+
+map : Base.Array<a> -> (a -> b) -> Base.Array<b> = {|array| {|body|
+    results := []
+    #js for(var i = 0, l = array.length; i < l; i++) {
+    element := #js array[i]
+    result := body(element)
+    #js results.push(result)
+    #js }
+    results
+}}
+
+filter : Base.Array<a> -> (a -> Base.Bool) -> Base.Array<a> = {|array| {|body|
+    results := []
+    #js for(var i = 0, l = array.length; i < l; i++) {
+    element := #js array[i]
+    Base.when(body(element)) {
+        #js results.push(element)
+    }
+    #js }
+    results
+}}
+
+flatten : Base.Array<Base.Array<a>> -> Base.Array<a> = {|array|
+    results := []
+    #js for(var i = 0, l = array.length; i < l; i++) {
+    #js for(var j = 0, k = array[i].length; j < k; j++) {
+    element := #js array[i][j]
+    #js results.push(element)
+    #js }
+    #js }
+    results
+}
+
+flatMap : Base.Array<a> -> (a -> Base.Array<b>) -> Base.Array<b> = {|array| {|body|
+    results := []
+    #js for(var i = 0, l = array.length; i < l; i++) {
+    element := #js array[i]
+    produced := body(element)
+    #js for(var j = 0, k = produced.length; j < k; j++) {
+    #js results.push(produced[j])
+    #js }
+    #js }
+    results
+}}
+
+at : (Base.Array<a>, Base.Int) -> Base.Option<a> = {|array, n|
+    #js if(n < 0 || n >= array.length) {
+    none := Base.None
+    #js return none
+    #js }
+    result := #js array[n]
+    Base.Some(value = result)
+}
+
+length : Base.Array<a> -> Base.Int = {|array|
+    #js array.length
+}
+
+sort : Base.Array<a> -> ((a, a) -> Base.Bool) -> Base.Array<a> = {|array| {|before|
+    #js array.slice().sort(function(a, b) { return before(a, b) ? -1 : before(b, a) ? 1 : 0 })
+}}
+
+reverse : Base.Array<a> -> Base.Array<a> = {|array|
+    #js array.slice().reverse()
+}
+
+slice : (Base.Array<a>, Base.Option<Int>, Base.Option<Int>) -> Array<a> = {
+    |array, Base.Some(value = from), Base.Some(value = to)| #js array.slice(from, to)
+    |array, Base.Some(value = from), Base.None| #js array.slice(from)
+    |array, Base.None, Base.Some(value = to)| #js array.slice(0, to)
+    |array, Base.None, Base.None| #js array.slice()
+}

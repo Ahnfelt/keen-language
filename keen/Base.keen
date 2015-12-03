@@ -1,7 +1,7 @@
 #export Int [], String [], Array [], Option, Bool
 #export error, if, when, unless, while, switch
-#export some, mapOption, flatMapOption, flattenOption, getOption, forceOption
-#export each, map, filter, flatten, flatMap, at, length, sort, reverse, slice
+//#export some, mapOption, flatMapOption, flattenOption, getOption, forceOption
+//#export each, map, filter, flatten, flatMap, at, length, sort, reverse, slice
 
 #data Int []
 #data String []
@@ -32,7 +32,7 @@ while : (() -> Bool) -> (() -> a) -> () = {|condition| {|body|
 
 switch : a -> (a -> b) -> b = {|x| {|f| f(x) }}
 
-
+/*
 some : a -> Option<a> = {|a| Some(value = a)}
 
 mapOption : Option<a> -> (a -> b) -> Option<b> = {|option| {|body|
@@ -145,3 +145,4 @@ slice : (Array<a>, Option<Int>, Option<Int>) -> Array<a> = {
     |array, None, Some(value = to)| #js array.slice(0, to)
     |array, None, None| #js array.slice()
 }
+*/

@@ -702,8 +702,10 @@ object Parser {
         def go(t : Type) : Type = t match {
             case FunctionType(parameters, returns) => FunctionType(parameters.map(go), go(returns))
             case RigidType(name) => t
+            case ConstantType(name, parameters) if name.contains("#") =>
+                ConstantType(name, parameters.map(go))
             case ConstantType(name, parameters) if name.contains(".") =>
-                val Array(alias, unqualified) = name.split(".")
+                val Array(alias, unqualified) = name.split('.')
                 ConstantType(aliases(alias) + "#" + unqualified, parameters.map(go))
             case ConstantType(name, parameters) =>
                 ConstantType(moduleName + "#" + name, parameters.map(go))

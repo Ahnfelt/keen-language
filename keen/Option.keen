@@ -1,0 +1,35 @@
+#import Base = 'keen/Base.keen'
+#export some, map, flatMap, flatten, get, force
+
+some : a -> Base.Option<a> = {|a| Base.Some(value = a)}
+
+map : Base.Option<a> -> (a -> b) -> Base.Option<b> = {|option| {|body|
+    Base.switch(option) {
+        |Base.Some(value = a)| Base.Some(value = body(a))
+        |Base.None| Base.None
+    }
+}}
+
+flatMap : Base.Option<a> -> (a -> Base.Option<b>) -> Base.Option<b> = {|option| {|body|
+    Base.switch(option) {
+        |Base.Some(value = a)| body(a)
+        |Base.None| Base.None
+    }
+}}
+
+flatten : Base.Option<Base.Option<a>> -> Base.Option<a> = {
+    |Base.Some(value = a)| a
+    |Base.None| Base.None
+}
+
+get : Base.Option<a> -> (() -> a) -> a = {|option| {|default|
+    Base.switch(option) {
+        |Base.Some(value = a)| a
+        |Base.None| default()
+    }
+}}
+
+force : Base.Option<a> -> a = {
+    |Base.Some(value = a)| a
+    |Base.None| Base.error('forceOption(None)')
+}
