@@ -453,6 +453,8 @@ object Parser {
                 cursor.next()
                 if(name.contains(".")) throw Failure("Unexpected dot (.) in type parameter", Some(cursor.lookBehind()))
                 Success(List(RigidType(name)))
+            case _ =>
+                throw Failure("Expected type", Some(cursor.lookAhead()))
         }
     }
 

@@ -1,4 +1,8 @@
 #import 'keen/Base.keen'
+#export main
 
 Base.error('This should happen!!!11one')
 
+main : () -> () = {
+
+}
