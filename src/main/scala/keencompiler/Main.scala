@@ -48,8 +48,31 @@ object Main extends JSApp {
         builder.toString()
     }
 
-    def main() : Unit = {
-
+    @JSExport
+    def f5() : Unit = {
+        js.eval("""
+            (function() {
+                var done = false;
+                try {
+                    var compiled = keencompiler.Main().compile('_', "#import Main = 'keen/Main.keen'\nMain.main()");
+                    done = true;
+                    eval.call(window, compiled);
+                } finally {
+                    if(!done) window.onerror = function(e) {
+                        var typePrefix = 'Uncaught java.lang.RuntimeException: ';
+                        if(e.indexOf(typePrefix) == 0) e = e.slice(typePrefix.length);
+                        var parsePrefix = 'Uncaught keencompiler.Parser$Failure: ';
+                        if(e.indexOf(parsePrefix) == 0) e = e.slice(parsePrefix.length);
+                        document.body.style.color = '#ff0000';
+                        document.body.style.padding = '20px';
+                        document.body.style.fontSize = '20px';
+                        document.body.textContent = e;
+                    };
+                }
+            })();
+        """)
     }
 
+    @JSExport
+    override def main() : Unit = {}
 }
