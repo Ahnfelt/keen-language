@@ -36,7 +36,7 @@ object Parser {
     case class NonRigidType(name : String) extends Type { override def toString = name }
     case class ConstantType(name : String, parameters : List[Type]) extends Type {
         override def toString = {
-            val parametersString = parameters match { case List() => ""; case _ => "<" + parameters.map(_.toString).mkString(", ") + ">" }
+            val parametersString = parameters match { case List() => ""; case _ => "[" + parameters.map(_.toString).mkString(", ") + "]" }
             val shortName = if(name.startsWith("keen/Base.keen#")) name.drop("keen/Base.keen#".length) else name
             shortName + parametersString
         }
@@ -52,7 +52,7 @@ object Parser {
     case class ConstructorDefinition(name : String, fields : List[(String, Type)])
 
     sealed abstract class Statement(var position : Position = null)
-    case class SumTypeStatement(name : String, parameters : List[String], constructors : List[(String, List[(String, Scheme)])]) extends Statement
+    case class SumTypeStatement(name : String, parameters : List[(String, Int)], constructors : List[(String, List[(String, Scheme)])]) extends Statement
     case class VariableStatement(name : String, scheme : Option[Scheme], value : Term) extends Statement
     case class AssignStatement(term : Term, operator : Token, value : Term) extends Statement
     case class TermStatement(term : Term) extends Statement
@@ -415,7 +415,7 @@ object Parser {
             case Upper(x) => x
             case _ => return Failure("Expected type constructor", Some(cursor.lookBehind()))
         }
-        if(cursor.lookAhead() == LessThan()) {
+        if(cursor.lookAhead() == LeftSquare()) {
             cursor.next()
             val parameter = require(parseType(cursor))
             val parameters = ListBuffer[Type](parameter)
@@ -423,7 +423,7 @@ object Parser {
                 cursor.next()
                 parameters += require(parseType(cursor))
             }
-            if(cursor.next() != GreaterThan()) throw new Failure("Expected '>'", Some(cursor.lookBehind()))
+            if(cursor.next() != RightSquare()) throw new Failure("Expected ']'", Some(cursor.lookBehind()))
             Success(ConstantType(name, parameters.toList))
         } else {
             Success(ConstantType(name, List()))
@@ -507,13 +507,24 @@ object Parser {
             case Upper(name) =>
                 if(name.contains(".")) throw Failure("Unexpected dot (.) in type name", Some(cursor.lookBehind()))
                 val parameters = cursor.lookAhead() match {
-                    case LeftSquare() => List[String]()
-                    case LessThan() =>
+                    case LeftRound() => List[(String, Int)]()
+                    case LeftSquare() =>
                         cursor.next()
                         def nextParameter() = cursor.next() match {
                             case Lower(x) =>
                                 if(x.contains(".")) throw Failure("Unexpected dot (.) in type parameter", Some(cursor.lookBehind()))
-                                x
+                                val kind = if(cursor.lookAhead() != LeftSquare()) 0 else {
+                                    cursor.next()
+                                    if(cursor.next() != Underscore()) throw Failure("Expected underscore (_)", Some(cursor.lookBehind()))
+                                    var kindArity = 1
+                                    while(cursor.next() == Comma()) {
+                                        kindArity += 1
+                                        if(cursor.next() != Underscore()) throw Failure("Expected underscore (_)", Some(cursor.lookBehind()))
+                                    }
+                                    if(cursor.lookBehind() != RightSquare()) throw Failure("Expected ']'", Some(cursor.lookBehind()))
+                                    kindArity
+                                }
+                                x -> kind
                             case _ => throw new Failure("Expected a lowercase type parameter", Some(cursor.lookBehind()))
                         }
                         val initial = nextParameter()
@@ -522,19 +533,19 @@ object Parser {
                             cursor.next()
                             list += nextParameter()
                         }
-                        if(cursor.next() != GreaterThan()) throw new Failure("Expected '>'", Some(cursor.lookBehind()))
+                        if(cursor.next() != RightSquare()) throw new Failure("Expected ']'", Some(cursor.lookBehind()))
                         list.toList
                 }
-                if(cursor.next() != LeftSquare()) throw new Failure("Expected '['", Some(cursor.lookBehind()))
+                if(cursor.next() != LeftRound()) throw new Failure("Expected '('", Some(cursor.lookBehind()))
                 val constructors = ListBuffer[ConstructorDefinition]()
-                if(cursor.lookAhead() != RightSquare()) {
+                if(cursor.lookAhead() != RightRound()) {
                     constructors += require(parseConstructorDefinition(cursor))
                     while(cursor.lookAhead() == Comma()) {
                         cursor.next()
                         constructors += require(parseConstructorDefinition(cursor))
                     }
                 }
-                if(cursor.next() != RightSquare()) throw new Failure("Expected ']'", Some(cursor.lookBehind()))
+                if(cursor.next() != RightRound()) throw new Failure("Expected ')'", Some(cursor.lookBehind()))
                 Success(SumTypeStatement(name, parameters, constructors.toList.map(t => t.name -> t.fields.map(f => f._1 -> Scheme(List(), List(), f._2)))))
             case _ =>
                 Failure("Expected identifier followed by :", Some(cursor.lookBehind()))
@@ -596,9 +607,9 @@ object Parser {
         val concreteTypes = ListBuffer[String]()
         val abstractTypes = ListBuffer[String]()
         def parseTypeExport(name : String) = {
-            if(cursor.lookAhead() == LeftSquare()) {
+            if(cursor.lookAhead() == LeftRound()) {
                 cursor.next()
-                if(cursor.next() != RightSquare()) throw Failure("Expected right bracket: ]", Some(cursor.lookBehind()))
+                if(cursor.next() != RightRound()) throw Failure("Expected right parenthesis: )", Some(cursor.lookBehind()))
                 abstractTypes += name
             } else {
                 concreteTypes += name

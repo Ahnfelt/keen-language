@@ -48,12 +48,12 @@ class TypeInference(fullModuleName : String) {
                     constructors.find(_._1 == name) match {
                         case None => throw new RuntimeException("Unknown constructor: " + name + ", of type: " + typeName)
                         case Some((_, expectedFields)) =>
-                            val freshParameters = expectedTypeParameters.map(x => x -> NonRigidType(typeVariables.fresh()))
+                            val freshParameters = expectedTypeParameters.map(_._1).map(x => x -> NonRigidType(typeVariables.fresh()))
                             val constantType = ConstantType(typeName, freshParameters.map(t => t._2))
                             for(field <- fields) expectedFields.find(_._1 == field._1) match {
                                 case None => throw new RuntimeException("Unknown field: " + field._1 + ", for constructor: " + name)
                                 case Some((_, scheme)) =>
-                                    val fieldType = instantiate(Scheme(expectedTypeParameters, List(), instantiate(scheme)), Some(freshParameters.toMap))
+                                    val fieldType = instantiate(Scheme(expectedTypeParameters.map(_._1), List(), instantiate(scheme)), Some(freshParameters.toMap))
                                     val resultType = checkPattern(field._2)
                                     unify(fieldType, resultType)
                             }
@@ -123,15 +123,15 @@ class TypeInference(fullModuleName : String) {
                     constructors.find(_._1 == name) match {
                         case None => throw new RuntimeException("Unknown constructor: " + name + ", of type: " + typeName)
                         case Some((_, expectedFields)) =>
-                            val freshParameters = expectedTypeParameters.map(x => x -> NonRigidType(typeVariables.fresh()))
+                            val freshParameters = expectedTypeParameters.map(_._1).map(x => x -> NonRigidType(typeVariables.fresh()))
                             for(field <- fields) expectedFields.find(_._1 == field._1) match {
                                 case None => throw new RuntimeException("Unknown field: " + field._1 + ", for constructor: " + name)
                                 case Some((_, scheme)) =>
                                     val resultType = checkTerm(field._2)
                                     val oldTypeVariables = typeVariables.copy
-                                    unify(instantiate(Scheme(expectedTypeParameters, List(), scheme.generalType), Some(freshParameters.toMap)), resultType)
+                                    unify(instantiate(Scheme(expectedTypeParameters.map(_._1), List(), scheme.generalType), Some(freshParameters.toMap)), resultType)
                                     typeVariables = oldTypeVariables
-                                    val fieldType = instantiate(Scheme(expectedTypeParameters, List(), instantiate(scheme)), Some(freshParameters.toMap))
+                                    val fieldType = instantiate(Scheme(expectedTypeParameters.map(_._1), List(), instantiate(scheme)), Some(freshParameters.toMap))
                                     unify(fieldType, resultType)
                             }
                             if(expectedFields.length > fields.length) {
@@ -163,7 +163,7 @@ class TypeInference(fullModuleName : String) {
                             })
                             constructor._2.find(_._1 == label) match {
                                 case None => throw new RuntimeException("No such field: ." + label + ", of " + recordType)
-                                case Some((_, scheme)) => instantiate(Scheme(statement.parameters, List(), instantiate(scheme)), Some((statement.parameters zip parameters).toMap))
+                                case Some((_, scheme)) => instantiate(Scheme(statement.parameters.map(_._1), List(), instantiate(scheme)), Some((statement.parameters.map(_._1) zip parameters).toMap))
                             }
                     }
                 case RecordType(fields) =>
@@ -238,7 +238,7 @@ class TypeInference(fullModuleName : String) {
         if(sumTypes.get(statement.name).isDefined) throw new RuntimeException("Type already defined: " + statement.name)
         def createFieldSchemes(fields : List[(String, Scheme)]) : List[(String, Scheme)] = {
             for((label, wrongScheme) <- fields) yield {
-                val free = freeRigid(wrongScheme.generalType) -- statement.parameters
+                val free = freeRigid(wrongScheme.generalType) -- statement.parameters.map(_._1)
                 label -> wrongScheme.copy(parameters = free.toList)
             }
         }
@@ -538,7 +538,7 @@ class TypeInference(fullModuleName : String) {
                 }
                 constructor._2.find(_._1 == constraint.label) match {
                     case None => throw new RuntimeException("No such field: ." + constraint.label + ", of " + name)
-                    case Some((_, scheme)) => instantiate(Scheme(statement.parameters, List(), instantiate(scheme)), Some((statement.parameters zip parameters).toMap))
+                    case Some((_, scheme)) => instantiate(Scheme(statement.parameters.map(_._1), List(), instantiate(scheme)), Some((statement.parameters.map(_._1) zip parameters).toMap))
                 }
         }
     }

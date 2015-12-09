@@ -1,13 +1,13 @@
-#export Int [], String [], Array [], Option, Bool
+#export Int (), String (), Array (), Option, Bool
 #export error, if, when, unless, while, switch
 //#export some, mapOption, flatMapOption, flattenOption, getOption, forceOption
 //#export each, map, filter, flatten, flatMap, at, length, sort, reverse, slice
 
-#data Int []
-#data String []
-#data Array<a> []
-#data Option<a> [None, Some(value : a)]
-#data Bool [False, True]
+#data Int ()
+#data String ()
+#data Array[a] ()
+#data Option[a] (None, Some(value : a))
+#data Bool (False, True)
 
 error : String -> a = {|message|
     #js throw message
