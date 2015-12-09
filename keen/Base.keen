@@ -1,7 +1,5 @@
 #export Int (), String (), Array (), Option, Bool
 #export error, if, when, unless, while, switch
-//#export some, mapOption, flatMapOption, flattenOption, getOption, forceOption
-//#export each, map, filter, flatten, flatMap, at, length, sort, reverse, slice
 
 #data Int ()
 #data String ()
